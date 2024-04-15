@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 start=$(pwd)
+## Note that VERSION here is not the same as the version used to build the container.
+## I _need_ to change one of them.
+export RENDER_VERSION=$(date +%Y%m)
 
 function usage() {
     echo "This script by default will render every file in the list:"
@@ -20,6 +23,7 @@ function cleanup() {
 }
 
 function render_inputs() {
+    echo "Version: ${RENDER_VERSION}"
     echo "This script should render the Rmd files in the list:"
     echo "${inputs}."
     mkdir -p excel figures
@@ -30,8 +34,7 @@ function render_inputs() {
             echo "The file: ${finished} already exists, skipping this input."
         else
             echo "Rendering: ${input}"
-            Rscript -e "hpgltools::renderme('${input}', 'html_document')" \
-                    2>"${base}.stderr" 1>"${base}.stdout"
+            Rscript -e "hpgltools::renderme('${input}', 'html_document')"
             if [[ "$?" -ne 0 ]]; then
                 echo "The Rscript failed."
             else

@@ -60,3 +60,12 @@ time:
    tree with a prefix of '$(date +%Y%M)' and put them there.  It also
    copies the input data, sample sheets, etc there for one to play
    with.
+
+## Failures observed when moving to bioc 3.18:
+
+A change in devtools caused me to change how I install the various dependencies/prerequisites.
+This in theory should be more robust, but in practice is a big mess.  It turns out that there
+is a significant population of packages which worked in 3.17 but not in 3.18.  As a result I
+am now handling this in two passes: one where I allow devtools to install whatever version
+it chooses for each package -- these tend to be bioc 3.17.  I then take a second pass via
+BiocManager::install() to update some/many to the 3.18 version.
