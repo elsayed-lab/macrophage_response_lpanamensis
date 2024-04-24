@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 start=$(pwd)
 ##commit="b26529d25251c3d915b718460ef34194dbf8e418"
-log=/setup_hpgltools.stdout
-err=/setup_hpgltools.stderr
 prefix="/sw/local/conda/${VERSION}"
-## I know one shouldn't use cat | grep, but I don't trust the proc filesystem to act like a file.
-cpus=$(cat /proc/cpuinfo | grep -c processor)
+log=/hpgltools.stdout
+cpus=$(grep -c processor /proc/cpuinfo)
 echo "Starting setup_hpgltools, downloading required headers and utilities." | tee -a ${log}
 
 ## The following installation is for stuff needed by hpgltools, these may want to be moved
 ## to the following mamba stanza
 apt-get -y install libharfbuzz-dev libfribidi-dev libjpeg-dev libxft-dev libfreetype6-dev \
-        libmpfr-dev libnetcdf-dev libtiff-dev wget 1>/dev/null 2>${err}
+        libmpfr-dev libnetcdf-dev libtiff-dev wget 1>/dev/null 2>&1
 apt-get clean
 
 echo "Installing mamba with hpgltools env to ${prefix}." | tee -a ${log}
@@ -19,7 +17,7 @@ curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -axvj bin/m
 echo "Creating hpgltools conda environment." | tee -a ${log}
 micromamba --root-prefix="${prefix}" --yes create -n hpgltools \
            glpk imagemagick mpfr netcdf4 pandoc r-base=4.3.3 \
-           -c conda-forge 1>>${log} 2>>${err}
+           -c conda-forge 1>/dev/null 2>&1
 echo "Activating hpgltools" | tee -a ${log}
 source /usr/local/etc/bashrc
 ## Beginning hpgltools installation. The next line might be dangerous
@@ -29,10 +27,8 @@ source /usr/local/etc/bashrc
 echo "options(Ncpus=${cpus})" > "${HOME}/.Rprofile"
 echo "options(timeout=600)" >> "${HOME}/.Rprofile"
 echo "options(repos='https://cloud.r-project.org')" >> "${HOME}/.Rprofile"
-#echo "options(Bioc_mirror='')" >> ${HOME}/.Rprofile
-##echo "options(repos='https://bioconductor.org/packages/${BIOC_VERSION}/bioc')" >> ${HOME}/.Rprofile
 echo "Cloning the hpgltools repository." | tee -a ${log}
-git clone https://github.com/abelew/hpgltools.git 1>>${log} 2>>${err}
+git clone https://github.com/abelew/hpgltools.git 2>/dev/null 1>&2
 cd hpgltools || exit
 
 #echo "Explicitly setting to the commit which was last used for the analyses."
@@ -40,39 +36,42 @@ cd hpgltools || exit
 
 ## It turns out I cannot allow R to install the newest bioconductor version arbitrarily because
 ## not every package gets checked immediately, this caused everything to explode!
-echo "Installing bioconductor version ${BIOC_VERSION}."
-Rscript -e "install.packages('BiocManager', repo='http://cran.rstudio.com/')"
-Rscript -e "BiocManager::install(version='${BIOC_VERSION}', ask=FALSE)"
+echo "Installing bioconductor version ${BIOC_VERSION}." | tee -a ${log}
+Rscript -e "install.packages('BiocManager', repo='http://cran.rstudio.com/')" 2>/dev/null 1>&2
+Rscript -e "BiocManager::install(version='${BIOC_VERSION}', ask=FALSE)" 2>/dev/null 1>&2
 
 echo "Installing non-base R prerequisites, essentially tidyverse." | tee -a ${log}
-Rscript -e "BiocManager::install(c('devtools', 'tidyverse'), force=TRUE, update=TRUE, ask=FALSE)"
+Rscript -e "BiocManager::install(c('devtools', 'tidyverse'), force=TRUE, update=TRUE, ask=FALSE)" 2>/dev/null 1>&2
 
-echo "Installing hpgltools dependencies with bioconductor." | tee -a ${log}
-Rscript -e 'devtools::install_dev_deps(".", dependencies = "Depends")'
-Rscript -e 'devtools::install_dev_deps(".", dependencies = "Imports")'
-Rscript -e 'devtools::install_dev_deps(".", dependencies = "Suggests")'
+echo "Installing hpgltools packages from Depends via devtools." | tee -a ${log}
+Rscript -e 'devtools::install_dev_deps(".", dependencies = "Depends")' 2>/dev/null 1>&2
+echo "Installing hpgltools packages from Imports via devtools." | tee -a ${log}
+Rscript -e 'devtools::install_dev_deps(".", dependencies = "Imports")' 2>/dev/null 1>&2
+echo "Installing hpgltools packages from Suggests via devtools." | tee -a ${log}
+Rscript -e 'devtools::install_dev_deps(".", dependencies = "Suggests")' 2>/dev/null 1>&2
 
 ## preprocessCore has a bug which is triggered from within containers...
 ## https://github.com/Bioconductor/bioconductor_docker/issues/22
 echo "Installing preprocessCore without threading to get around a container-specific bug." | tee -a ${log}
-Rscript -e "BiocManager::install('preprocessCore', configure.args=c(preprocessCore='--disable-threading'), ask=FALSE, force=TRUE, update=TRUE, type='source')"
-
+Rscript -e "BiocManager::install('preprocessCore', configure.args=c(preprocessCore='--disable-threading'), ask=FALSE, force=TRUE, update=TRUE, type='source')" 2>/dev/null 1>&2
 
 ## It appears the ggtree package is having troubles...
 echo "Installing a dev version of ggtree due to weirdo errors, this is super annoying." | tee -a ${log}
-Rscript -e 'remotes::install_github("YuLab-SMU/ggtree")'
+Rscript -e 'remotes::install_github("YuLab-SMU/ggtree")' 2>/dev/null 1>&2
 echo "In my last revision I got weird clusterProfiler loading errors, testing it out here." | tee -a ${log}
-Rscript -e 'BiocManager::install(c("DOSE", "clusterProfiler"), force=TRUE, update=TRUE, ask=FALSE)'
+Rscript -e 'BiocManager::install(c("DOSE", "clusterProfiler"), force=TRUE, update=TRUE, ask=FALSE)' 2>/dev/null 1>&2
 
 ## I like these sankey plots and vennerable, but they are not in bioconductor.
 echo "Installing ggsankey and vennerable." | tee -a ${log}
-Rscript -e 'devtools::install_github("davidsjoberg/ggsankey")' 1>/dev/null 2>>${err}
-Rscript -e 'devtools::install_github("js229/Vennerable")' 1>/dev/null 2>>${err}
+Rscript -e 'devtools::install_github("davidsjoberg/ggsankey")' 1>/dev/null 2>&1
+Rscript -e 'devtools::install_github("js229/Vennerable")' 1>/dev/null 2>&1
 ## The new version of dbplyr is broken and causes my annotation download to fail, and therefore _everything_ else.
-Rscript -e 'devtools::install_version("dbplyr", version="2.3.4", repos="http://cran.us.r-project.org")' 1>/dev/null 2>>${err}
+echo "Getting around a problematic dbplyr version." | tee -a ${log}
+Rscript -e 'devtools::install_version("dbplyr", version="2.3.4", repos="http://cran.us.r-project.org")' 1>/dev/null 2>&1
 
-Rscript -e 'BiocManager::install(), force=TRUE, update=TRUE, ask=FALSE)'
+echo "Attempting to ensure everything is at bioconductor version: ${BIOC_VERSION}" | tee -a ${log}
+Rscript -e 'BiocManager::install(), force=TRUE, update=TRUE, ask=FALSE)' 2>/dev/null 1>&2
 
 echo "Installing hpgltools itself." | tee -a ${log}
-R CMD INSTALL .
-cd $start || exit
+R CMD INSTALL . 2>/dev/null 1>&2
+cd "${start}" || exit

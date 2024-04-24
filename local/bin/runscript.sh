@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+set -o errtrace
+set -o pipefail
 start=$(pwd)
 ## Note that VERSION here is not the same as the version used to build the container.
-## I _need_ to change one of them.
 export RENDER_VERSION=$(date +%Y%m)
+
 
 function usage() {
     echo "This script by default will render every file in the list:"
@@ -34,7 +36,7 @@ function render_inputs() {
             echo "The file: ${finished} already exists, skipping this input."
         else
             echo "Rendering: ${input}"
-            Rscript -e "hpgltools::renderme('${input}', 'html_document')"
+            Rscript -e "hpgltools::renderme('${input}', 'html_document')" | tee -a "${base}.log"
             if [[ "$?" -ne 0 ]]; then
                 echo "The Rscript failed."
             else
@@ -76,19 +78,21 @@ shift $(expr $OPTIND - 1) # remove options from positional parameters
 ## If -i is not provided, then we are not working from within the container
 ## and so will not create a directory from within the /output bind mount.
 
-output_dir="/output/$(date +%Y%m%d)_outputs"
-inputs="01datasets.Rmd:02visualization.Rmd:03differential_expression.Rmd"
-
+output_dir="$(date +%Y%m%d%H%M)_outputs"
 mkdir -p "${output_dir}"
-## Handle the default state if no parameters are provided.
 cd "${output_dir}" || exit
-echo "No colon-separated input file(s) given, analyzing the archived panamensis data."
+## DEFAULT_INPUT is provided in the yml file.
+inputs="${DEFAULT_INPUT}"
+echo "No colon-separated input file(s) given, analyzing the archived data."
 rsync -a /data/ .
-untarred=$(cd preprocessing && tar xaf macrophage_host_counts.tar)
-untarred=$(cd preprocessing && tar xaf macrophage_parasite_counts.tar)
+for i in $(/bin/ls /data/preprocessing/*.tar); do
+    untarred=$(cd preprocessing && tar xaf "${i}")
+done
 
 if [[ -n "${untarred}" ]]; then
     echo "The tar command appears to have printed some output."
 fi
 render_inputs
-cd "${start}"
+cd "${start}" || exit
+rm current_output
+ln -s "${output_dir}" current_output
