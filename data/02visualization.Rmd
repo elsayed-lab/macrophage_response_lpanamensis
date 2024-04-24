@@ -1,0 +1,722 @@
+---
+title: "TMRC2 `r Sys.getenv('VERSION')`: Visualizing Macrophage samples."
+author: "atb abelew@gmail.com"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_download: true
+    code_folding: show
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: zenburn
+    keep_md: false
+    mode: selfcontained
+    number_sections: true
+    self_contained: true
+    theme: readable
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+<style type="text/css">
+body .main-container {
+  max-width: 1600px;
+}
+body, td {
+  font-size: 16px;
+}
+code.r{
+  font-size: 16px;
+}
+pre {
+ font-size: 16px
+}
+</style>
+
+```{r options, include = FALSE}
+library(ggrepel)
+library(Heatplus)
+library(hpgltools)
+library(glue)
+tt <- try(devtools::load_all("~/hpgltools"))
+knitr::opts_knit$set(progress = TRUE, verbose = TRUE, width = 90, echo = TRUE)
+knitr::opts_chunk$set(
+  error = TRUE, fig.width = 8, fig.height = 8, fig.retina = 2,
+  out.width = "100%", dev = "png",
+  dev.args = list(png = list(type = "cairo-png")))
+old_options <- options(digits = 4, stringsAsFactors = FALSE, knitr.duplicate.label = "allow")
+ggplot2::theme_set(ggplot2::theme_bw(base_size = 12))
+ver <- Sys.getenv("VERSION")
+previous_file <- ""
+rundate <- format(Sys.Date(), format = "%Y%m%d")
+
+## tmp <- try(sm(loadme(filename = gsub(pattern = "\\.Rmd", replace = "\\.rda\\.xz", x = previous_file))))
+rmd_file <- "02visualization.Rmd"
+loaded <- load(file = glue("rda/tmrc2_data_structures-v{ver}.rda"))
+savefile <- gsub(pattern = "\\.Rmd", replace = "\\.rda\\.xz", x = rmd_file)
+```
+
+# Introduction
+
+This document will visualize the TMRC2 samples before completing the various differential
+expression and variant analyses in the hopes of getting an understanding of how the various
+samples relate to each other.
+
+# Library sizes and nonzero genes
+
+## Human data
+
+This is really comprised of two datasets, one which is purely the
+comparison of the various parasite strains, and another which is
+derived from an experiment performed at CIDEIM which compares human
+macrophages as well as U937 cells following a infection and/or
+treatment with the antimonial.  With that in mind, the next few plots
+are of this experiment.
+
+### Library sizes
+
+Showing this plot twice in order to make explicit that our range of
+coverage really is pretty extraordinary.
+
+```{r human_libsize}
+hs_lib <- plot_libsize(hs_macrophage, yscale = "log2")
+pp(file = glue("images/hs_macrophage_libsize-v{ver}.svg"), width = 15, height = 9)
+hs_lib$plot
+dev.off()
+hs_lib
+
+hs_lib_log <- plot_libsize(hs_macrophage)
+hs_lib_log
+```
+
+Potential start for a figure legend:
+
+Library sizes of the protein coding gene counts observed per sample.
+The samples were mapped with hisat2 using the hg38 revision 100 human
+genome; the alignments were sorted, indexed, and counted via htseq
+using the gene features and non-protein coding features were excluded.
+The per-sample sums of the remaining matrix were plotted to check that
+the relative sample coverage is sufficient and not too divergent
+across samples.
+
+```{r hs_nonzero}
+hs_non <- plot_nonzero(hs_macrophage, cutoff = 0.65)
+pp(file = glue("images/hs_macrophage_nonzero-v{ver}.svg"))
+hs_non$plot
+dev.off()
+hs_non
+```
+
+Differences in relative gene content with respect to sequencing
+coverage.  The per-sample number of observed genes was plotted with
+respect to the relative CPM coverage in order to check that the
+samples are sufficiently and similarly diverse.  Many samples were
+observed near the putative asymptote of likely gene content; no
+samples were observed with fewer than 65% of the human genes included.
+
+```{r hs_boxplot}
+hs_box <- plot_boxplot(hs_macrophage)
+pp(file = "images/hs_macrophage_boxplot.svg")
+hs_box
+dev.off()
+hs_box
+```
+
+The distribution of observed counts / gene for all samples was plotted
+as a boxplot on the log2 scale.  No genes were observed as explicit
+outliers and the range of mean coverage spanned an order of magnitude
+from 20-200 reads/gene.  Quartile boxes were colored according to
+infection status and drug treatment.
+
+```{r hs_prepost_filter}
+filter_plot <- plot_libsize_prepost(hs_macrophage)
+pp(file = "images/hs_macrophage_lowgene.svg")
+filter_plot$lowgene_plot
+dev.off()
+filter_plot
+
+pp(file = "images/hs_macrophage_lowcount.svg")
+filter_plot$count_plot
+dev.off()
+filter_plot$count_plot
+```
+
+Numbers of low-count genes before and after filtering.  The height of
+each bar represents the number of low-count genes (>= 2 counts) before
+performing a low-count filter.  The lower bar represents the number of
+genes remaining after low-count filtering, the number inside the bar
+is the difference.
+
+When the low-count filter is applied, some samples have significantly
+more than the cutoff number of counts/gene (2).  As a result, when the
+number of total counts removed is plotted, that sum is ubiquitously
+more than twice the number of removed gene and only approaches that
+threshold for the samples with lowest coverage.  This suggests that a
+coefficient of variance-based filter may be more appropriate under
+some circumstances.
+
+## Distribution Visualizations
+
+The distribution of samples observed in the macrophage dataset is
+evocative and suggests that there are very clear distinctions between
+the two strains as well as the drug treatment.
+
+### PCA
+
+There are a few ways we can express the sample distribution via PCA;
+in this instance we explicitly concatenate the infection and drug
+treatment status into one factor.
+
+As of 202212, we now have a set of samples from two different cell
+types: macrophages and U937.  Thus the first order of business is to
+observe their similarities/differences.
+
+```{r pre_questions}
+type_batch <- set_expt_batches(hs_macrophage, fact="typeofcells")
+type_batch_norm <- normalize_expt(type_batch, norm = "quant", transform = "log2",
+                                  convert = "cpm", filter = TRUE)
+type_batch_pca <- plot_pca(type_batch_norm, plot_title = "PCA of macrophage expression values",
+                           plot_alpha = 0.6, plot_labels = FALSE)
+
+pp(file = glue("images/type_batch_macrophage_norm_pca-v{ver}.svg"))
+type_batch_pca$plot
+dev.off()
+type_batch_pca
+```
+
+The differences, as expected are stark.  Thus, let us consider the
+macrophage and U937 samples separately.  In addition, consider the
+samples behind the lense of sample date, strain, infection status, etc.
+
+```{r macro_only}
+hs_macr <- subset_expt(hs_macrophage, subset = "typeofcells=='Macrophages'")
+
+written <- write_expt(
+  hs_macr,
+  excel = glue("analyses/macrophage_de/{ver}/read_counts/hs_macr-v{ver}.xlsx"))
+
+macr_norm <- normalize_expt(hs_macr, norm = "quant", transform = "log2",
+                            convert = "cpm", filter = TRUE)
+
+macr_pca <- plot_pca(macr_norm, plot_title = "PCA of macrophage expression values",
+                     plot_alpha = 0.6, plot_labels = FALSE)
+
+pp(file = glue("images/macr_norm_pca_labeled-v{ver}.png"), width=20, height=12)
+macr_pca$plot +
+  geom_text_repel(aes(label=sampleid), force=1, label.padding=10, box.padding=10, max.overlaps=100)
+dev.off()
+
+pp(file = glue("images/macr_norm_pca-v{ver}.svg"))
+macr_pca$plot
+dev.off()
+macr_pca
+
+hs_macr_datebatch <- set_expt_batches(hs_macr, fact = "oldnew")
+macr_date_norm <- normalize_expt(hs_macr_datebatch, norm = "quant", transform = "log2",
+                                 convert = "cpm", filter = TRUE)
+macr_date_pca <- plot_pca(
+  macr_date_norm,
+  plot_title = "PCA of macrophage expression values, date batch",
+  plot_alpha = 0.6, plot_labels = FALSE)
+pp(file = glue("images/macr_norm_date_pca-v{ver}.svg"))
+macr_date_pca$plot
+dev.off()
+macr_date_pca
+```
+
+Some of the same questions/observations are interesting for the U937 samples.
+
+Note to self, I already created this subset in the tmrc2_datasets file, this is redundant.
+
+```{r u937_only}
+hs_u937 <- subset_expt(hs_macrophage, subset = "typeofcells!='Macrophages'")
+u937_written <- write_expt(
+  hs_u937, excel = glue("analyses/macrophage_de/{ver}/read_counts/hs_u937_reads-v{ver}.xlsx"))
+u937_norm <- normalize_expt(hs_u937, norm = "quant", transform = "log2",
+                            convert = "cpm", filter = TRUE)
+u937_pca <- plot_pca(u937_norm, plot_title = "PCA of U937 expression values",
+                     plot_alpha = 0.6, plot_labels = FALSE)
+pp(file = glue("images/u937_norm_pca-v{ver}.svg"))
+u937_pca$plot
+dev.off()
+u937_pca
+```
+
+Having taken some views of the samples, repeat with sva.
+
+```{r macrophage_sva}
+hs_nb <- normalize_expt(hs_macr, convert = "cpm", transform = "log2",
+                        filter = TRUE, batch = "svaseq")
+hs_nb_pca <- plot_pca(hs_nb, plot_title = "PCA of macrophage expression values post-sva",
+                      plot_alpha = 0.6, plot_labels = FALSE)
+
+pp(file = "images/hs_macr_nb_pca.svg")
+hs_nb_pca$plot
+dev.off()
+hs_nb_pca
+```
+
+Some likely text for a figure legend might include something like the
+following (paraphrased from Najib's 2016 dual transcriptome profiling
+paper (10.1128/mBio.00027-16)):
+
+Expression profiles of the human macrophages in response to drug
+treatment and/or parasite infection by two strains.  Each glyph
+represents one sample, the circular samples were not infected; green
+circles were not treated while yellow circles were.  Zymodeme 2.2
+infected samples are squares with/out antimonial (purple and green
+respectively).  Zymodeme 2.3 infected samples are diamonds with/out
+antimonial treatment (pink and orange respectively).  This analysis
+was performed following a low-count filter, cpm conversion, quantile
+normalization, and a log2 transformation.  The second plot is
+identical except surrogate estimates were derived by svaseq (which
+estimated 3 surrogates) after normalization and those estimates were
+used to modify the normalized counts before log2 transformation.
+
+Some interpretation for this figure might include:
+
+When PCA was performed on the human macrophage transcriptome data, the first
+principal component coincided with drug treatment and the second with
+differences between zymodemes. The uninfected samples were observed to
+have very similar transcriptional profiles to the corresponding
+zymodeme 2.2 samples, suggesting that infection with zymodeme 2.2 has
+a relatively minimal impact on the macrophage.  In contrast, the
+zymodeme 2.3 samples, excepting one drug treated sample, displayed a
+significant shift from the uninfected and z2.2.  This shift was
+particularly evident in the non-treated samples.  When sva was applied
+to this data, it slightly improved the observed differences between
+the drug treatments and zymodeme infections, but did not significantly
+change the relationship between z2.2 and the uninfected samples.
+
+## Compare to drug + infection/zymodeme
+
+The primary contrasts actually examined in
+03differential_expression.Rmd are after combining the metadata factors
+associated with the drug treatment and infection strain (or
+uninfected).  With that in mind, I should make a version of the above
+using the same logic.
+
+Thus, for the moment I am going to copy the appropriate block straight
+out of the 03 file.
+
+```{r}
+new_conditions <- paste0(pData(hs_macrophage)[["macrophagetreatment"]], "_",
+  pData(hs_macrophage)[["macrophagezymodeme"]])
+## Note the sanitize() call is redundant with the addition of sanitize() in the
+## datastructures file, but I don't want to wait to rerun that.
+hs_macr <- set_expt_conditions(hs_macrophage, fact = new_conditions) %>%
+  sanitize_expt_pData(column = "drug") %>%
+  subset_expt(subset = "typeofcells!='U937'")
+```
+
+I am reasonably certain this is the dataset of interest.
+
+### Recreate PCA with labels
+
+So, now let us repeat the pca with the extra labels and larger canvas.
+
+```{r}
+hs_macr_norm <- normalize_expt(hs_macr, filter = TRUE, convert = "cpm",
+                               transform = "log2", norm = "quant")
+de_pca <- plot_pca(hs_macr_norm)
+## ok, that looks just like the previous image, now lets make it bigger with labels...
+
+pp(file = "images/infection_drug_pca.png", width = 20, height = 12)
+de_pca$plot +
+  geom_text_repel(aes(label = sampleid), force = 1, label.padding = 10,
+                  box.padding = 10, max.overlaps = 100)
+dev.off()
+de_pca
+```
+
+
+
+### Correlation heatmaps
+
+```{r correlation_heatmaps}
+corheat <- plot_corheat(macr_norm, plot_title = "Correlation heatmap of macrophage
+                 expression values
+")
+corheat
+
+corheat <- plot_corheat(hs_nb, plot_title = "Correlation heatmap of macrophage
+                 expression values
+")
+corheat
+
+disheat <- plot_disheat(macr_norm, plot_title = "Euclidean heatmap of macrophage
+                 expression values
+")
+disheat
+
+disheat_nb <- plot_disheat(hs_nb, plot_title = "Euclidean heatmap of macrophage
+                 expression values
+")
+disheat_nb
+
+plot_sm(macr_norm)$plot
+```
+
+Potential start for a figure legend:
+
+Global relationships among the human macrophage transcriptional
+profiles.  Pairwise pearson correlations and Euclidean distances were
+calculated using the normalized expression matrices.  Colors along the
+top row delineate the experimental conditions (same colors as the PCA)
+and the colors along the first column delineate infection status
+(purple: z2.3, yellow: z2.2, green: uninfected).  Samples were
+clustered by nearest neighbor clustering and each colored tile
+describes one correlation value between two samples (red to white
+delineates pearson correlation values of the 11,460 normalized gene
+values between two samples ranging from <= 0.9 to >= 0.98) or
+the euclidean distance between two samples (dark blue to white
+delineates identical to a normalized euclidean distance of >= 90).
+
+Some interpretation for this figure might include:
+
+When the global relationships among the samples were distilled down to
+individual euclidean distances or pearson correlation coefficients
+between pairs of samples, the primary clustering among samples
+observed was according to drug treatment.  Secondary clades
+intermingled the z2.2 and uninfected samples.  The data before svaseq
+provides weak evidence for the hypothesis that sample TMRC30062 (z2.3
+drug treated) is actually a z2.2 drug treated sample.  This hypothesis
+was discounted by manually examining the relatively few parasite reads
+in IGV and comparing the observed variant positions to other known
+(not drug treated) z2.3 and z2.2 samples (in this case I compared
+TMRC30062, the sample in question, to TMRC30061 (the same strain
+without drug treatment), TMRC30063 (another z2.3 strain
+without drug treatment) and TMRC30286 (a z2.2 (strain ID 11075) sample
+which was not treated); because the drug treated sample has few reads,
+it is difficult to find z2.2-specific variants; but positive matches
+were readily identifiable to previously characterized z2.3-specific
+variants.  Three such locations are shown in the following image
+(chromosome 31, 682.4Kb, 691.5kb, 673kb):
+
+* Note, I commented out the picture because I am worried it will mess
+up rendering in the container.
+<!--- [igv/igv_snapshot_checking_zymodeme_sample.svg](igv/igv_snapshot_checking_zymodeme_sample.svg) --->
+
+I also wrote a scoring function which sums up all observed variant
+positions by putative zymodeme status and for this sample it found 11
+positions which were z2.2 specific, 119 which were z2.3 specific, 2808
+positions (out of 3541: 0.793) which did not have z2.2 specific variants and
+71,944 positions (out of 81,556: 0.882) which did not have z2.3 specific
+variants).  The proportions of strain specific (un)observed variant
+positions is interesting because it changed over time/celltype for
+some people. The observed changes might just be noise in the data (we
+only observed 130 specific positions out of ~80,000 in this sample,
+for example), but in at least some cases it seems evocative.
+
+# Sources of variance
+
+One thing I did not realize until this very moment, weird combinations
+of donor/drug/treatment/zymodeme are confounded.  Drug and treatment
+are confounded by definition, but it looks like donor and treatment
+are, too.  This limits the ability to run variancePartition slightly.
+
+## Donor, drug, zymodeme
+
+Let us first run variancePartition in the order donor,drug,zymodeme;
+which, as Theresa noted, should bias the results in that order.
+
+Oddly, when I did this, it appears to not change the results at all,
+let us look a little more closely.
+
+```{r}
+table(pData(hs_macr)[["donor"]])
+table(pData(hs_macr)[["drug"]])
+table(pData(hs_macr)[["macrophagezymodeme"]])
+table(pData(hs_macr)[["rnaextractiondate"]])
+table(pData(hs_macr)[["oldnew"]])
+
+donor_drug_zymo_varpart <- simple_varpart(
+    hs_macr,
+    factors = c("donor", "drug", "macrophagezymodeme"))
+donor_drug_zymo_varpart
+
+by_donor <- replot_varpart_percent(donor_drug_zymo_varpart,
+                                   column = "donor")
+by_donor
+
+by_zymo <- replot_varpart_percent(donor_drug_zymo_varpart,
+                                  column = "macrophagezymodeme")
+by_zymo
+top_ids <- gsub(x = head(rownames(by_zymo[["resorted"]]), n = 100),
+                pattern = "^gene:", replacement = "")
+high_zymo_variance_gp <- simple_gprofiler(top_ids)
+high_zymo_variance_gp
+
+written <- write_gprofiler_data(
+  high_zymo_variance_gp,
+  excel = glue("analyses/macrophage_de/{ver}/gprofiler/high_zymodeme_variance-v{ver}.xlsx"))
+
+by_drug <- replot_varpart_percent(donor_drug_zymo_varpart, column = "drug")
+by_drug
+top_ids <- gsub(x = head(rownames(by_drug[["resorted"]]), n = 100),
+                pattern = "^gene:", replacement = "")
+high_drug_variance_gp <- simple_gprofiler(top_ids)
+high_drug_variance_gp
+high_drug_variance_gp$pvalue_plots$MF
+written <- write_gprofiler_data(
+  high_drug_variance_gp,
+  excel = glue("analyses/macrophage_de/{ver}/gprofiler/high_drug_variance-v{ver}.xlsx"))
+
+time_drug_zymo_varpart <- simple_varpart(
+    hs_macr,
+    factors = c("oldnew", "drug", "macrophagezymodeme"))
+time_drug_zymo_varpart$partition_plot
+```
+
+### Compare to PCA with drug as color and donor as shape.
+
+```{r}
+drug_donor_test <- set_expt_conditions(hs_macr, fact = "drug") %>%
+  set_expt_batches(fact = "donor")
+drug_donor_norm <- normalize_expt(drug_donor_test, norm = "quant", filter = TRUE,
+                                  convert = "cpm", transform = "log2")
+plot_pca(drug_donor_norm)
+
+drug_norm_cv <- plot_variance_coefficients(drug_donor_norm)
+drug_norm_cv
+```
+
+### Same comparison, but this time with infected state as shape
+
+```{r}
+drug_infectedp_test <- set_expt_conditions(hs_macr, fact = "drug") %>%
+  set_expt_batches(fact = "batch")
+drug_infectedp_norm <- normalize_expt(drug_infectedp_test, norm = "quant", filter = TRUE,
+                                  convert = "cpm", transform = "log2")
+plot_pca(drug_infectedp_norm)
+```
+
+## Drug zymodeme donor
+
+```{r variancePartition}
+drug_zymo_donor_varpart <- simple_varpart(
+    hs_macr,
+    factors = c("drug", "macrophagezymodeme", "donor"))
+
+donor_drug_zymo_varpart$partition_plot
+donor_drug_zymo_varpart$model_used
+drug_zymo_donor_varpart$partition_plot
+drug_zymo_donor_varpart$model_used
+```
+
+I think the above shows that the order of elements used in the model
+do not affect the results.
+
+# Examine Donors
+
+## Donor comparison
+
+```{r}
+combined_batch <- paste0(pData(hs_macr)[["drug"]], "_",
+  pData(hs_macr)[["macrophagezymodeme"]])
+hs_donors <- set_expt_conditions(hs_macr, fact = "donor") %>%
+  set_expt_batches(fact = "macrophagezymodeme")
+
+donor_norm <- normalize_expt(hs_donors, filter = TRUE,
+                             convert = "cpm", transform = "log2")
+donor_norm_cv <- plot_variance_coefficients(donor_norm)
+donor_norm_cv
+
+pp(file = "images/tmrc2_macrophages_donors.svg")
+plot_pca(donor_norm, plot_labels = FALSE)
+dev.off()
+
+donor_nb <- normalize_expt(hs_donors, filter = TRUE, norm = "quant",
+                           convert = "cpm", transform = "log2", batch = "svaseq")
+pp(file = "images/tmrc2_macrophages_donors_sva.png")
+plot_pca(donor_nb, plot_labels = FALSE)
+dev.off()
+```
+
+## Drug comparison
+
+```{r drug_visualization}
+hs_drug <- set_expt_conditions(hs_macr, fact = "drug")
+
+drug_norm <- normalize_expt(hs_drug, filter = TRUE, norm = "quant",
+                             convert = "cpm", transform = "log2")
+pp(file = "images/tmrc2_macrophages_drugs.svg")
+plot_pca(drug_norm, plot_labels = FALSE)
+dev.off()
+
+drug_nb <- normalize_expt(hs_drug, filter = TRUE, norm = "quant",
+                           convert = "cpm", transform = "log2", batch = "svaseq")
+pp(file = "images/tmrc2_macrophages_drugs_sva.svg")
+plot_pca(drug_nb, plot_labels = FALSE)
+dev.off()
+```
+
+## Parasite data
+
+### Library sizes, non-zero plot, and distribution
+
+```{r parasite_libsize}
+lp_lib <- plot_libsize(lp_macrophage)
+pp(file = "images/lp_macrophage_libsize.svg")
+lp_lib$plot
+dev.off()
+lp_lib
+
+lp_non <- plot_nonzero(lp_macrophage)
+pp(file = "images/lp_macrophage_nonzero.svg")
+lp_non$plot
+dev.off()
+lp_non
+
+lp_box <- plot_boxplot(lp_macrophage)
+pp(file = "images/lp_macrophage_boxplot.svg")
+lp_box
+dev.off()
+lp_box
+
+filter_plot <- plot_libsize_prepost(lp_macrophage)
+pp(file = "images/lp_macrophage_lowgene.svg")
+filter_plot$lowgene_plot
+dev.off()
+filter_plot
+
+pp(file = "images/lp_macrophage_lowcount.svg")
+filter_plot$count_plot
+dev.off()
+filter_plot$count_plot
+```
+
+The parasite metrics are identical in theory to the human macrophage
+plots above with one relevant difference.  In the box plot, the
+distribution of observed reads/gene follows a different distribution
+than what was observed in the host, this difference is due to the very
+different transcriptional profile of the Leishmania parasite.
+
+## Distribution Visualizations
+
+The PCA and heatmap plots for the parasite samples are largely
+identical in concept to the macrophage plots above with one very
+important difference.  Only 1 of the drug treated samples has
+sufficient parasite reads remaining to effectively quantify it, the
+other parasite samples were removed.
+
+This lone post-drug treated samples (TMRC30248, strain 11026) had the
+largest parasite load before treatment by a tremendous margin (it has
+268,826 SL reads compared to 72,489 in the second highest sample, the
+mean of the pre-drug treated samples is approximately 69,137 and
+median is 48,090).  Thus it is perhaps not surprising that it still
+has a significant number of SL-containing reads following treatment
+(30,052 vs 14,418 in the second highest).
+
+### Keeping one antimonial treated sample
+
+The following plots show the distinction between the two strains used
+in the experiment very clearly and suggest that, in the one case with
+sufficient surviving post-treatment parasites, the parasite
+transcriptional profile was not significantly changed by the
+antimonial treatment.
+
+```{r parasite_pca_v1}
+lp_norm <- normalize_expt(lp_macrophage, norm = "quant", transform = "log2",
+                          convert = "cpm", filter = TRUE)
+lp_pca <- plot_pca(lp_norm, plot_title = "PCA of macrophage expression values",
+                   plot_labels = FALSE)
+pp(file = "images/lp_macrophage_norm_pca.svg")
+lp_pca$plot
+dev.off()
+lp_pca
+
+lp_nb <- normalize_expt(lp_macrophage, convert = "cpm", transform = "log2",
+                        filter = "simple", batch = "svaseq")
+lp_nb_pca <- plot_pca(lp_nb, plot_title = "PCA of macrophage expression values post-sva",
+                      plot_labels = FALSE)
+pp(file = "images/lp_macrophage_nb_pca.svg")
+lp_nb_pca$plot
+dev.off()
+lp_nb_pca
+
+corheat <- plot_corheat(lp_norm, plot_title = "Correlation heatmap of parasite
+                 expression values
+")
+corheat
+
+corheat <- plot_corheat(lp_nb, plot_title = "Correlation heatmap of parasite
+                 expression values
+")
+corheat
+
+plot_sm(lp_norm)
+```
+
+The following repeats the parasite PCA without the peculiar
+post-antimonial sample.
+
+```{r parasite_pca_v2}
+lp_norm_nosb <- normalize_expt(lp_macrophage_nosb, norm = "quant", transform = "log2",
+                          convert = "cpm", filter = TRUE)
+lp_pca_nosb <- plot_pca(lp_norm_nosb, plot_title = "PCA of macrophage expression values",
+                   plot_labels = FALSE)
+pp(file = "images/lp_macrophage_norm_nosb_pca.svg")
+lp_pca_nosb$plot
+dev.off()
+lp_pca_nosb
+
+lp_nb_nosb <- normalize_expt(lp_macrophage_nosb, convert = "cpm", transform = "log2",
+                        filter = TRUE, batch = "svaseq")
+lp_nb_pca_nosb <- plot_pca(lp_nb_nosb, plot_title = "PCA of macrophage expression values post-sva",
+                      plot_labels = FALSE)
+pp(file = "images/lp_macrophage_nb_nosb_pca.svg")
+lp_nb_pca_nosb$plot
+dev.off()
+lp_nb_pca_nosb
+
+corheat_nosb <- plot_corheat(lp_norm_nosb, plot_title = "Correlation heatmap of parasite
+                 expression values
+")
+corheat_nosb
+
+corheat_nosb <- plot_corheat(lp_nb_nosb, plot_title = "Correlation heatmap of parasite
+                 expression values
+")
+corheat_nosb
+```
+
+# Some genes of interest
+
+One query from Olga and Maria Colmenares is to query a group of kinetoplast genes, including these:
+
+* kkt6: LPAL13_120005800
+* kkt2
+* KPAF1
+* KPAF1
+* kkt3
+* KRIPP3
+* kkt1
+
+Checking my annotations, they appear to be coming from the column 'annot_gene_name'.
+
+```{r query_genes_of_interest}
+wanted <- c("kkt6", "kkt2", "KPAF1", "kkt3", "KRIPP3", "kkt1")
+wanted %in% fData(lp_macrophage)[["annot_gene_name"]]
+ids <- fData(lp_macrophage)[["annot_gene_name"]] %in% wanted
+ids <- rownames(exprs(lp_macrophage))[ids]
+names <- fData(lp_macrophage)[ids, "annot_gene_name"]
+lp_norm <- normalize_expt(lp_macrophage, transform = "log2", convert = "cpm", norm = "quant")
+few_lp <- subset_genes(lp_norm, ids = ids, method = "keep")
+few_heat <- plot_sample_heatmap(few_lp, row_label = names)
+few_heat
+```
+
+```{r saveme}
+pander::pander(sessionInfo())
+message("This is hpgltools commit: ", get_git_commit())
+#  message("Saving to ", savefile)
+#  tmp <- sm(saveme(filename = savefile))
+```
+
+```{r loadme_after, eval = FALSE}
+tmp <- loadme(filename = savefile)
+```

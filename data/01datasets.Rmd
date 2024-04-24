@@ -1,0 +1,474 @@
+---
+title: "TMRC2 Macrophages `r Sys.getenv('VERSION')`: Data Set Creation"
+author: "atb abelew@gmail.com"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_download: true
+    code_folding: show
+    fig_caption: true
+    fig_height: 7
+    fig_width: 7
+    highlight: zenburn
+    keep_md: false
+    mode: selfcontained
+    number_sections: true
+    self_contained: true
+    theme: readable
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+<style type="text/css">
+body .main-container {
+  max-width: 1600px;
+}
+body, td {
+  font-size: 16px;
+}
+code.r{
+  font-size: 16px;
+}
+pre {
+ font-size: 16px
+}
+</style>
+
+```{r options, include=FALSE}
+library(hpgltools)
+library(glue)
+library(ggplot2)
+library(Heatplus)
+library(dplyr)
+library(EuPathDB)
+knitr::opts_knit$set(
+  progress = TRUE, verbose = TRUE, width = 90, echo = TRUE)
+knitr::opts_chunk$set(
+  error = TRUE, fig.width = 8, fig.height = 8, fig.retina = 2,
+  out.width = "100%", dev = "png",
+  dev.args = list("png" = list(type = "cairo-png")))
+old_options <- options(
+  digits = 4, stringsAsFactors = FALSE, knitr.duplicate.label = "allow")
+ggplot2::theme_set(ggplot2::theme_bw(base_size = 12))
+ver <- Sys.getenv("VERSION")
+rundate <- format(Sys.Date(), format = "%Y%m%d")
+
+rmd_file <- "01datasets.Rmd"
+savefile <- gsub(pattern = "\\.Rmd", replace = "\\.rda\\.xz", x = rmd_file)
+data_structures <- c()
+```
+
+# Introduction
+
+This document is intended to create the data structures used to
+evaluate our TMRC2 samples.  In some cases, this includes only those
+samples starting in 2019; in other instances I am including our
+previous (2015-2016) samples.
+
+In all cases the processing performed was:
+
+1.  Default trimming was performed.
+2.  Hisat2 was used to map the remaining reads against the Leishmania
+    panamensis genome revision 36.
+3.  The alignments from hisat2 were used to count reads/gene against the
+    revision 36 annotations with htseq.
+4.  These alignments were also passed to the pileup functionality of samtools
+    and the vcf/bcf utilities in order to make a matrix of all observed
+    differences between each sample with respect to the reference.
+5.  The freebayes variant estimation tool was used in addition to #4
+    to search for variant positions in a more robust fashion.
+6.  The trimmed reads were passed to kraken2 using a viral database in
+    order to look for samples with potential LRV sequence.
+7.  An explicit, grep-based search for spliced leader reads was used
+    against all human-derived samples.  The results from this were
+    copy/pasted into the sample sheet.
+
+# Notes 20221206 meeting
+
+I am thinking that this meeting will bring Maria Adelaida fully back
+into the analyses of the parasite data, and therefore may focus
+primarily on the goals rather than the analyses?
+
+* Maria Adelaida meeting with Olgla/Mariana: integrating
+  transcriptomics/genomics question.
+* Paper on relationship btwn primary metadata factors via transcriptome/genome.
+* Second on drug susceptibility without those factors (I think this
+  means the macrophages)
+* Definition of species?  MAG: Define consensus sequences for various
+  strains/species.  We effectively have this on hand, though the
+  quality may be a little less good for 2.3.
+* Resulting goal: Create a tree of the strains (I am just going to
+  call zymodemes strains from now on).
+**  What organisms would we include in a tree to describe these
+    relationships: guyanensis, braziliensis 2904, 2.2, 2.3, 2.1, 2.4,
+    panamensis reference, peruviania(sp? I have not seen this genome),
+    panama, 2903; actually this may be tricky because we have always
+    done this with a specific reference strain (panamensis col) which is
+    one of the strains in the comparison.  hmm...
+**  Check the most variant strains for identity (Luc)
+**  Methods for creating tree, traditional phylogeny vs. variant
+    hclust?
+* PCR queries, works well if one performs sanger sequencing.
+
+## Multiple datasets
+
+In a couple of important ways the TMRC2 data is much more complex than the
+TMRC3:
+
+1.  It comprises multiple, completely separate queries:
+    a.  Sequencing the parasite samples
+    b.  Sequencing a set of human macrophage samples which were infected
+        with specific parasite samples.
+2.  The parasite transcriptomic samples comprise multiple different
+    types of queries:
+    a.  Differential expression to look at strain, susceptibility, and
+    clinical outcomes.
+    b.  Individual variant searches to look for potentially useful
+    SNPs for classification of parasite samples.
+3.  The human macrophage samples may be used to query both the host
+    and parasite transcriptomes because (at least when not drug
+    treated) there is a tremendous population of parasite reads in
+    them.
+
+## Sample sheet(s)
+
+Our shared online sample sheet is nearly static at the time of this
+writing (202209), I expect at this point the only likely updates will
+be to annotate some strains as more or less susceptible to drug
+treatment.
+
+```{r}
+sample_sheet <- "sample_sheets/macrophage_samples.xlsx"
+```
+
+# Annotations
+
+Everything which follows depends on the Existing TriTrypDB annotations revision
+46, circa 2019.  The following block loads a database of these annotations and
+turns it into a matrix where the rows are genes and columns are all the
+annotation types provided by TriTrypDB.
+
+The same database was used to create a matrix of orthologous genes between
+L.panamensis and all of the other species in the TriTrypDB.
+
+The same database of annotations also provides mappings to the set of
+annotated GO categories for the L.panamensis genome along with gene
+lengths.
+
+```{r}
+meta <- download_eupath_metadata(webservice = "tritrypdb", overwrite = FALSE)
+panamensis_entry <- get_eupath_entry("MHOM", metadata = meta[["valid"]])
+panamensis_db <- make_eupath_orgdb(panamensis_entry)
+panamensis_pkg <- panamensis_db[["pkgname"]]
+package_name <- panamensis_db[["pkgname"]]
+if (is.null(panamensis_pkg)) {
+  panamensis_pkg <- panamensis_entry[["OrgdbPkg"]]
+  package_name <- panamensis_pkg
+}
+
+tt <- library(panamensis_pkg, character.only = TRUE)
+panamensis_env <- get0(panamensis_pkg)
+all_fields <- columns(panamensis_env)
+all_lp_annot <- sm(load_orgdb_annotations(
+    panamensis_env,
+    keytype = "gid",
+    fields = c("annot_gene_entrez_id", "annot_gene_name",
+               "annot_strand", "annot_chromosome", "annot_cds_length",
+               "annot_gene_product")))$genes
+## Testing to see just how big the full database is.
+## testing <- load_orgdb_annotations(panamensis_pkg, keytype = "gid", fields = "all")
+
+lp_go <- load_orgdb_go(panamensis_pkg)
+lp_go <- lp_go[, c("GID", "GO")]
+lp_lengths <- all_lp_annot[, c("gid", "annot_cds_length")]
+colnames(lp_lengths)  <- c("ID", "length")
+all_lp_annot[["annot_gene_product"]] <- tolower(all_lp_annot[["annot_gene_product"]])
+orthos <- sm(extract_eupath_orthologs(db = panamensis_pkg))
+data_structures <- c(data_structures, "lp_lengths", "lp_go", "all_lp_annot")
+```
+
+# Load a genome
+
+The following block loads the full genome sequence for panamensis.  We
+may use this later to attempt to estimate PCR primers to discern strains.
+
+I am not sure how to increase the number of open files in a container,
+as a result this does not work.
+
+```{r genome, eval=FALSE}
+testing_panamensis <- make_eupath_bsgenome(entry = panamensis_entry)
+library(as.character(testing_panamensis), character.only = TRUE)
+lp_genome <- get0(as.character(testing_panamensis))
+data_structures <- c(data_structures, "lp_genome")
+```
+
+# Generate Expressionsets and Sample Estimation
+
+The process of sample estimation takes two primary inputs:
+
+1.  The sample sheet, which contains all the metadata we currently have on hand,
+    including filenames for the outputs of #3 and #4 above.
+2.  The gene annotations.
+
+An expressionSet(or summarizedExperiment) is a data structure used in
+R to examine RNASeq data.  It is comprised of annotations, metadata,
+and expression data.  In the case of our processing pipeline, the
+location of the expression data is provided by the filenames in the metadata.
+
+## Define colors
+
+The following list contains the colors we have chosen to use when
+plotting the various ways of discerning the data.
+
+```{r}
+color_choices <- list(
+    "strain" = list(
+        ## "z1.0" = "#333333", ## Changed this to 'braz' to make it easier to find them.
+        "z2.0" = "#555555",
+        "z3.0" = "#777777",
+        "z2.1" = "#874400",
+        "z2.2" = "#0000cc",
+        "z2.3" = "#cc0000",
+        "z2.4" = "#df7000",
+        "z3.2" = "#888888",
+        "z1.0" = "#cc00cc",
+        "z1.5" = "#cc00cc",
+        "b2904" = "#cc00cc",
+        "unknown" = "#cbcbcb"),
+    ## "null" = "#000000"),
+    "zymo" = list(
+      "z22" = "#0000cc",
+      "z23" = "#cc0000"),
+    "cf" = list(
+        "cure" = "#006f00",
+        "fail" = "#9dffa0",
+        "unknown" = "#cbcbcb",
+        "notapplicable" = "#000000"),
+    "condition" = list(
+      "inf" = "#199c75",
+      "inf_sb" = "#d65d00",
+      "uninf" = "#6e6ea3",
+      "uninf_sb" = "#d83956"),
+    "significance" = list(
+      "lt0" = "#ffe0e0",
+      "lt1" = "#ffa0a0",
+      "lt2" = "#f94040",
+      "lt4" = "#a00000",
+      "gt0" = "#eeccf9",
+      "gt1" = "#de8bf9",
+      "gt2" = "#ad07e3",
+      "gt4" = "#410257"),
+    "drug" = list(
+      "none" = "#989898",
+      "antimony" = "#088b64"),
+    "oldnew" = list(
+      "previous" = "#2233aa",
+      "current" =  "#9c0303"),
+    "infectedp" = list(
+      "uninfected" = "#676767",
+      "infected" = "#ac06e2"),
+    "treatment_zymo" = list(
+      "infsb_z23" = "#E7298A",
+      "inf_z23" = "#D95F02",
+      "uninf_none" = "#66A61E",
+      "uninfsb_none" = "#E6AB02",
+      "inf_z22" = "#1B9E77",
+      "infsb_z22" = "#7570B3"),
+    "susceptibility" = list(
+        "resistant" = "#8563a7",
+        "sensitive" = "#8d0000",
+        "ambiguous" = "#cbcbcb",
+        "unknown" = "#555555"))
+data_structures <- c(data_structures, "color_choices")
+```
+
+# Macrophage data
+
+All of the above focused entire on the parasite samples, now let us
+pull up the macrophage infected samples.  This will comprise two
+datasets, one of the human and one of the parasite.
+
+## Macrophage host data
+
+The metadata for the macrophage samples contains a couple of columns
+for mapped human and parasite reads.  We will therefore use them
+separately to create two expressionsets, one for each species.
+
+```{r}
+hs_annot <- load_biomart_annotations(year = "2020")
+hs_annot <- hs_annot[["annotation"]]
+hs_annot[["transcript"]] <- paste0(rownames(hs_annot), ".", hs_annot[["transcript_version"]])
+rownames(hs_annot) <- make.names(hs_annot[["ensembl_gene_id"]], unique = TRUE)
+rownames(hs_annot) <- paste0("gene:", rownames(hs_annot))
+tx_gene_map <- hs_annot[, c("transcript", "ensembl_gene_id")]
+
+sanitize_columns <- c("drug", "macrophagetreatment", "macrophagezymodeme")
+macr_annot <- hs_annot
+rownames(macr_annot) <- gsub(x = rownames(macr_annot),
+                             pattern = "^gene:",
+                             replacement = "")
+
+hs_macrophage <- create_expt(sample_sheet, gene_info = macr_annot,
+                             file_column = "hg38100hisatfile") %>%
+  set_expt_conditions(fact = "macrophagetreatment") %>%
+  set_expt_batches(fact = "macrophagezymodeme") %>%
+  sanitize_expt_pData(columns = sanitize_columns) %>%
+  subset_expt(nonzero = 12000)
+fixed_genenames <- gsub(x = rownames(exprs(hs_macrophage)), pattern = "^gene:",
+                        replacement = "")
+hs_macrophage <- set_expt_genenames(hs_macrophage, ids = fixed_genenames)
+table(pData(hs_macrophage)$condition)
+
+## The following 3 lines were copy/pasted to datastructures and should be removed soon.
+nostrain <- is.na(pData(hs_macrophage)[["strainid"]])
+pData(hs_macrophage)[nostrain, "strainid"] <- "none"
+
+pData(hs_macrophage)[["strain_zymo"]] <- paste0("s", pData(hs_macrophage)[["strainid"]],
+                                                "_", pData(hs_macrophage)[["macrophagezymodeme"]])
+uninfected <- pData(hs_macrophage)[["strain_zymo"]] == "snone_none"
+pData(hs_macrophage)[uninfected, "strain_zymo"] <- "uninfected"
+
+pData(hs_macrophage)[["infectedp"]] <- "infected"
+pData(hs_macrophage)[uninfected, "infectedp"] <- "uninfected"
+
+data_structures <- c(data_structures, "hs_macrophage")
+```
+
+## Subset and create different groupings
+
+```{r}
+all_human <- sanitize_expt_pData(hs_macrophage, columns = "drug") %>%
+  set_expt_conditions(fact = "drug") %>%
+  set_expt_batches(fact = "typeofcells")
+data_structures <- c(data_structures, "all_human")
+
+## The following 3 lines were copy/pasted to datastructures and should be removed soon.
+no_strain_idx <- pData(all_human)[["strainid"]] == "none"
+##pData(all_human)[["strainid"]] <- paste0("s", pData(all_human)[["strainid"]],
+##                                         "_", pData(all_human)[["macrophagezymodeme"]])
+pData(all_human)[no_strain_idx, "strainid"] <- "none"
+table(pData(all_human)[["strainid"]])
+
+all_human_types <- set_expt_conditions(all_human, fact = "typeofcells") %>%
+  set_expt_batches(fact = "drug")
+data_structures <- c(data_structures, "all_human_types")
+
+type_zymo_fact <- paste0(pData(all_human_types)[["condition"]], "_",
+                         pData(all_human_types)[["macrophagezymodeme"]])
+type_zymo <- set_expt_conditions(all_human_types, fact = type_zymo_fact)
+data_structures <- c(data_structures, "type_zymo")
+
+type_drug_fact <- paste0(pData(all_human_types)[["condition"]], "_",
+                         pData(all_human_types)[["drug"]])
+type_drug <- set_expt_conditions(all_human_types, fact = type_drug_fact)
+data_structures <- c(data_structures, "type_drug")
+
+strain_fact <- pData(all_human_types)[["strainid"]]
+table(strain_fact)
+
+new_conditions <- paste0(pData(hs_macrophage)[["macrophagetreatment"]], "_",
+                         pData(hs_macrophage)[["macrophagezymodeme"]])
+## Note the sanitize() call is redundant with the addition of sanitize() in the
+## datastructures file, but I don't want to wait to rerun that.
+hs_macr <- set_expt_conditions(hs_macrophage, fact = new_conditions) %>%
+  sanitize_expt_pData(column = "drug") %>%
+  set_expt_colors(color_choices[["treatment_zymo"]]) %>%
+  subset_expt(subset = "typeofcells!='U937'")
+data_structures <- c(data_structures, "hs_macr")
+
+ggstats_parasite <- plot_metadata_factors(hs_macr, column = "parasitemappingrate",
+                                         type = "ggstats", scale = "log2")
+pp(file = "images/ggstats_parasiterate_all_macrophage_drug_treatment.png")
+ggstats_parasite
+dev.off()
+ggstats_parasite
+
+
+hs_macr_drug_expt <- set_expt_conditions(hs_macr, fact = "drug")
+
+hs_macr_strain_expt <- set_expt_conditions(hs_macr, fact = "macrophagezymodeme") %>%
+  subset_expt(subset = "macrophagezymodeme != 'none'")
+data_structures <- c(data_structures, "hs_macr_strain_expt")
+
+table(pData(hs_macr)[["strainid"]])
+```
+
+Let us see if the sankey plot of these samples looks useful...
+
+```{r}
+ggstats_slreads <- plot_metadata_factors(hs_macrophage, column = "hisatlpsinglemapped",
+                                         type = "ggstats", scale = "log2")
+pp(file = "images/ggstats_slreads_all_macrophage.png")
+ggstats_slreads
+dev.off()
+ggstats_slreads
+ggstats_violin <- plot_metadata_factors(hs_macrophage, column = "hisatlpsinglemapped",
+                                        scale = "log2")
+ggstats_violin
+
+macr_sankey <- plot_meta_sankey(hs_macrophage, color_choices = color_choices,
+                                factors = c("oldnew", "drug", "infectedp", "macrophagezymodeme"))
+macr_sankey
+```
+Finally, split off the U937 samples.
+
+```{r}
+hs_u937 <- subset_expt(hs_macrophage, subset = "typeofcells!='Macrophages'")
+data_structures <- c(data_structures, "hs_u937")
+```
+
+## Macrophage parasite data
+
+In the previous block, we used a new invocation of ensembl-derived
+annotation data, this time we can just use our existing parasite gene
+annotations.
+
+```{r}
+lp_macrophage <- create_expt(sample_sheet,
+                             file_column = "lpanamensisv36hisatfile",
+                             gene_info = all_lp_annot,
+                             savefile = glue("rda/lp_macrophage-v{ver}.rda"),
+                             annotation = "org.Lpanamensis.MHOMCOL81L13.v46.eg.db") %>%
+set_expt_conditions(fact = "macrophagezymodeme") %>%
+  set_expt_batches(fact = "macrophagetreatment")
+
+unfilt_written <- write_expt(
+  lp_macrophage,
+  excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_reads_unfiltered-v{ver}.xlsx"))
+
+lp_macrophage_filt <- subset_expt(lp_macrophage, nonzero = 2500) %>%
+  semantic_expt_filter(semantic = c("amastin", "gp63", "leishmanolysin"),
+                       semantic_column = "annot_gene_product")
+data_structures <- c(data_structures, "lp_macrophage", "lp_macrophage_filt")
+filt_written <- write_expt(lp_macrophage_filt,
+  excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_reads_filtered-v{ver}.xlsx"))
+lp_macrophage <- lp_macrophage_filt
+
+lp_macrophage_nosb <- subset_expt(lp_macrophage, subset="batch!='inf_sb'")
+lp_nosb_write <- write_expt(
+  lp_macrophage_nosb,
+  excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_nosb_reads-v{ver}.xlsx"))
+data_structures <- c(data_structures, "lp_macrophage_nosb")
+
+spec <- make_rnaseq_spec()
+test <- sm(gather_preprocessing_metadata(sample_sheet, specification = spec))
+```
+
+# Save all data structures into one rda
+
+```{r save_all_data}
+save(list = data_structures, file = glue("rda/tmrc2_data_structures-v{ver}.rda"))
+```
+
+```{r saveme}
+pander::pander(sessionInfo())
+message("This is hpgltools commit: ", get_git_commit())
+message("Saving to ", savefile)
+# tmp <- sm(saveme(filename = savefile))
+```
+
+```{r loadme_after, eval = FALSE}
+tmp <- loadme(filename = savefile)
+```
