@@ -32,15 +32,16 @@ code.r{
   font-size: 16px;
 }
 pre {
- font-size: 16px
+  font-size: 16px
 }
 </style>
 
-```{r options, include = FALSE}
+```{r options, include=FALSE}
 library(ggrepel)
+library(glue)
 library(Heatplus)
 library(hpgltools)
-library(glue)
+
 tt <- try(devtools::load_all("~/hpgltools"))
 knitr::opts_knit$set(progress = TRUE, verbose = TRUE, width = 90, echo = TRUE)
 knitr::opts_chunk$set(
@@ -81,7 +82,7 @@ are of this experiment.
 Showing this plot twice in order to make explicit that our range of
 coverage really is pretty extraordinary.
 
-```{r human_libsize}
+```{r}
 hs_lib <- plot_libsize(hs_macrophage, yscale = "log2")
 pp(file = glue("images/hs_macrophage_libsize-v{ver}.svg"), width = 15, height = 9)
 hs_lib$plot
@@ -102,7 +103,7 @@ The per-sample sums of the remaining matrix were plotted to check that
 the relative sample coverage is sufficient and not too divergent
 across samples.
 
-```{r hs_nonzero}
+```{r}
 hs_non <- plot_nonzero(hs_macrophage, cutoff = 0.65)
 pp(file = glue("images/hs_macrophage_nonzero-v{ver}.svg"))
 hs_non$plot
@@ -117,7 +118,7 @@ samples are sufficiently and similarly diverse.  Many samples were
 observed near the putative asymptote of likely gene content; no
 samples were observed with fewer than 65% of the human genes included.
 
-```{r hs_boxplot}
+```{r}
 hs_box <- plot_boxplot(hs_macrophage)
 pp(file = "images/hs_macrophage_boxplot.svg")
 hs_box
@@ -131,7 +132,7 @@ outliers and the range of mean coverage spanned an order of magnitude
 from 20-200 reads/gene.  Quartile boxes were colored according to
 infection status and drug treatment.
 
-```{r hs_prepost_filter}
+```{r}
 filter_plot <- plot_libsize_prepost(hs_macrophage)
 pp(file = "images/hs_macrophage_lowgene.svg")
 filter_plot$lowgene_plot
@@ -174,8 +175,8 @@ As of 202212, we now have a set of samples from two different cell
 types: macrophages and U937.  Thus the first order of business is to
 observe their similarities/differences.
 
-```{r pre_questions}
-type_batch <- set_expt_batches(hs_macrophage, fact="typeofcells")
+```{r}
+type_batch <- set_expt_batches(hs_macrophage, fact = "typeofcells")
 type_batch_norm <- normalize_expt(type_batch, norm = "quant", transform = "log2",
                                   convert = "cpm", filter = TRUE)
 type_batch_pca <- plot_pca(type_batch_norm, plot_title = "PCA of macrophage expression values",
@@ -204,10 +205,13 @@ macr_norm <- normalize_expt(hs_macr, norm = "quant", transform = "log2",
 macr_pca <- plot_pca(macr_norm, plot_title = "PCA of macrophage expression values",
                      plot_alpha = 0.6, plot_labels = FALSE)
 
-pp(file = glue("images/macr_norm_pca_labeled-v{ver}.png"), width=20, height=12)
-macr_pca$plot +
-  geom_text_repel(aes(label=sampleid), force=1, label.padding=10, box.padding=10, max.overlaps=100)
+pretty <- macr_pca$plot +
+  geom_text_repel(aes(label = sampleid), force = 1, label.padding = 10,
+                  box.padding = 10, max.overlaps = 100)
+pp(file = glue("images/macr_norm_pca_labeled-v{ver}.png"), width = 20, height = 12)
+pretty
 dev.off()
+pretty
 
 pp(file = glue("images/macr_norm_pca-v{ver}.svg"))
 macr_pca$plot
@@ -231,7 +235,7 @@ Some of the same questions/observations are interesting for the U937 samples.
 
 Note to self, I already created this subset in the tmrc2_datasets file, this is redundant.
 
-```{r u937_only}
+```{r}
 hs_u937 <- subset_expt(hs_macrophage, subset = "typeofcells!='Macrophages'")
 u937_written <- write_expt(
   hs_u937, excel = glue("analyses/macrophage_de/{ver}/read_counts/hs_u937_reads-v{ver}.xlsx"))
@@ -253,8 +257,8 @@ hs_nb <- normalize_expt(hs_macr, convert = "cpm", transform = "log2",
 hs_nb_pca <- plot_pca(hs_nb, plot_title = "PCA of macrophage expression values post-sva",
                       plot_alpha = 0.6, plot_labels = FALSE)
 
-pp(file = "images/hs_macr_nb_pca.svg")
-hs_nb_pca$plot
+pp(file = "images/hs_macr_nb_pca.pdf")
+hs_nb_pca[["plot"]]
 dev.off()
 hs_nb_pca
 ```
@@ -323,16 +327,35 @@ hs_macr_norm <- normalize_expt(hs_macr, filter = TRUE, convert = "cpm",
                                transform = "log2", norm = "quant")
 de_pca <- plot_pca(hs_macr_norm)
 ## ok, that looks just like the previous image, now lets make it bigger with labels...
-
-pp(file = "images/infection_drug_pca.png", width = 20, height = 12)
-de_pca$plot +
+pretty <- de_pca$plot +
   geom_text_repel(aes(label = sampleid), force = 1, label.padding = 10,
                   box.padding = 10, max.overlaps = 100)
+pp(file = "images/infection_drug_pca.png", width = 20, height = 12)
+pretty
 dev.off()
-de_pca
+pretty
 ```
 
+Now repeat with sva included.  A version of this is currently Figure 1B.
 
+A recent request was to exclude the shapes for infection strain, so let us add that below.
+
+```{r}
+hs_macr_nb <- normalize_expt(hs_macr, filter = TRUE, convert = "cpm",
+                               transform = "log2", batch = "svaseq")
+hs_macr_nb_pca <- plot_pca(hs_macr_nb)
+pp(file = "figures/figure_1b_pca.svg")
+hs_macr_nb_pca[["plot"]]
+dev.off()
+hs_macr_nb_pca
+
+hs_macr_nb_noshape <- set_expt_batches(hs_macr_nb, fact = "experiment")
+hs_macr_nb_noshape_pca <- plot_pca(hs_macr_nb_noshape)
+pp(file = "figures/figure_1b_pca_noshape.pdf")
+hs_macr_nb_noshape_pca[["plot"]]
+dev.off()
+hs_macr_nb_noshape_pca
+```
 
 ### Correlation heatmaps
 
@@ -478,7 +501,11 @@ drug_donor_test <- set_expt_conditions(hs_macr, fact = "drug") %>%
   set_expt_batches(fact = "donor")
 drug_donor_norm <- normalize_expt(drug_donor_test, norm = "quant", filter = TRUE,
                                   convert = "cpm", transform = "log2")
-plot_pca(drug_donor_norm)
+donor_pca <- plot_pca(drug_donor_norm)
+pp(file = "figures/donor_norm_pca.svg")
+donor_pca[["plot"]]
+dev.off()
+donor_pca
 
 drug_norm_cv <- plot_variance_coefficients(drug_donor_norm)
 drug_norm_cv
@@ -525,15 +552,19 @@ donor_norm <- normalize_expt(hs_donors, filter = TRUE,
 donor_norm_cv <- plot_variance_coefficients(donor_norm)
 donor_norm_cv
 
+macrophage_donor_pca <- plot_pca(donor_norm, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_donors.svg")
-plot_pca(donor_norm, plot_labels = FALSE)
+macrophage_donor_pca$plot
 dev.off()
+macrophage_donor_pca
 
 donor_nb <- normalize_expt(hs_donors, filter = TRUE, norm = "quant",
                            convert = "cpm", transform = "log2", batch = "svaseq")
+macrophage_donors_sva_pca <- plot_pca(donor_nb, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_donors_sva.png")
-plot_pca(donor_nb, plot_labels = FALSE)
+macrophage_donors_sva_pca$plot
 dev.off()
+macrophage_donors_sva_pca
 ```
 
 ## Drug comparison
@@ -542,16 +573,20 @@ dev.off()
 hs_drug <- set_expt_conditions(hs_macr, fact = "drug")
 
 drug_norm <- normalize_expt(hs_drug, filter = TRUE, norm = "quant",
-                             convert = "cpm", transform = "log2")
+                            convert = "cpm", transform = "log2")
+drug_norm_pca <- plot_pca(drug_norm, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_drugs.svg")
-plot_pca(drug_norm, plot_labels = FALSE)
+drug_norm_pca$plot
 dev.off()
+drug_norm_pca
 
 drug_nb <- normalize_expt(hs_drug, filter = TRUE, norm = "quant",
                            convert = "cpm", transform = "log2", batch = "svaseq")
+drug_nb_pca <- plot_pca(drug_nb, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_drugs_sva.svg")
-plot_pca(drug_nb, plot_labels = FALSE)
+drug_nb_pca$plot
 dev.off()
+drug_nb_pca
 ```
 
 ## Parasite data

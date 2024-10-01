@@ -32,17 +32,20 @@ code.r{
   font-size: 16px;
 }
 pre {
- font-size: 16px
+  font-size: 16px
 }
 </style>
 
 ```{r options, include = FALSE}
+library(ggbreak)
 library(ggplot2)
 library(glue)
 library(Heatplus)
 library(hpgltools)
 library(UpSetR)
 library(tibble)
+library(tidyr)
+library(enrichplot)
 
 knitr::opts_knit$set(progress = TRUE, verbose = TRUE, width = 90, echo = TRUE)
 knitr::opts_chunk$set(
@@ -59,17 +62,22 @@ rundate <- format(Sys.Date(), format = "%Y%m%d")
 rmd_file <- "03differential_expression.Rmd"
 loaded <- load(file = glue("rda/tmrc2_data_structures-v{ver}.rda"))
 savefile <- gsub(pattern = "\\.Rmd", replace = "\\.rda\\.xz", x = rmd_file)
+created <- dir.create("analyses")
 ```
 
 # Changelog
 
+* 202401-202405: Cleanups, formatting, ensuring that everything works in the container.
 * 202310: Cleaning up to make everything pass within a containerized environment.
 * 202310: Received a set of colors and contrasts of interest for a barplot of significance.
 * 20230410: Making some changes to improve the differential expression
-plots as well as prepare for some different pathway/GSEA/GSVA
-analyses on the data.
+  plots as well as prepare for some different pathway/GSEA/GSVA
+  analyses on the data.
 
 # Notes
+
+202408: Question about reactome z2.3/uninfected down: 253 genes
+observed but no reactome result observed?
 
 Showing plots of counts with respect to drug treatment: query to Najib
 to clarify normalization. I think I can make versions of these plots
@@ -84,8 +92,8 @@ illustrative of a couple of interesting questions, let us perform a
 couple of differential analyses of it.
 
 Also note that as of 202212, we received a new set of samples which
-now include some which are of a completely different cell type,
-U937. As their ATCC page states, they are malignant cells taken from
+now include some which are a completely different cell type,
+U937.  As their ATCC page states, they are malignant cells taken from
 the pleural effusion of a 37 year old white male with histiocytic
 lymphoma and which exhibit the morphology of monocytes.  Thus, this
 document now includes some comparisons of the cell types as well as
@@ -184,10 +192,10 @@ Given the various ways we have chopped up this dataset, there are a
 few general types of contrasts we will perform, which will then be
 combined into greater complexity:
 
-* drug treatment
-* strains used
-* cellltypes
-* donors
+* drug treatment: Antimonal treated or not.
+* strains used: Uninfected, z2.3, and z2.2.
+* cellltypes: U937 or macrophage.
+* donors: The person from whom the macrophages were taken.
 
 In the end, our actual goal is to consider the variable effects of
 drug+strain and see if we can discern patterns which lead to better or
@@ -198,6 +206,11 @@ this data, these follow.  I created one ratio of ratios contrast which
 I think has the potential to ask our biggest question.
 
 ```{r}
+## Each of the following lists has the name of the contrast as the key
+## followed by a two element vector comprised of the numerator and
+## denominator as the value.  In the case of this first contrast, that
+## is comprised of a string which manually defines a series of more
+## complex contrasts than the usual/simple pairwise.
 tmrc2_human_extra <- "z23drugnodrug_vs_z22drugnodrug = (infsbz23 - infz23) - (infsbz22 - infz22), z23z22drug_vs_z23z22nodrug = (infsbz23 - infsbz22) - (infz23 - infz22)"
 tmrc2_human_keepers <- list(
   "z23nosb_vs_uninf" = c("infz23", "uninfnone"),
@@ -246,6 +259,10 @@ u937_keepers <- list(
   "z23sb_vs_uninf" = c("infsbz23", "uninfnone"),
   "z22sb_vs_uninf" = c("infsbz22", "uninfnone"),
   "sb_vs_uninf" = c("uninfsbnone", "uninfnone"))
+## If some cases, when the set of significant genes was chosen, an
+## additional filter was added to exclude genes with expression values
+## less than 'high_expression' according to the
+## 'high_expression_column' in the table.
 high_expression <- 128
 high_expression_column <- "deseq_basemean"
 
@@ -255,29 +272,37 @@ combined_to_tsv <- function(combined, celltype = "all") {
     kname <- names(keepers)[k]
     numerator <- keepers[[k]][1]
     denominator <- keepers[[k]][2]
-    filename <- glue("excel/macrophage_de/{ver}/tsv_tables/tmrc2_{celltype}_{kname}_n{numerator}_d{denominator}-v{ver}.xlsx")
+    filename <- glue("analyses/macrophage_de/tsv_tables/tmrc2_{celltype}_{kname}_n{numerator}_d{denominator}-v{ver}.xlsx")
     kdata <- combined[["data"]][[kname]]
     if (is.null(kdata[["basic_num"]])) {
       next
     }
-    wanted <- c("hgncsymbol", "deseq_logfc", "deseq_adjp", "deseq_basemean", "deseq_num", "deseq_den")
+    wanted <- c("hgncsymbol", "deseq_logfc", "deseq_adjp",
+                "deseq_basemean", "deseq_num", "deseq_den")
     wanted_data <- kdata[, wanted]
-    colnames(wanted_data) <- c("hgncsymbol", "deseq_logfc", "deseq_adjp", "deseq_mean", "deseq_numerator", "deseq_denominator")
+    colnames(wanted_data) <- c("hgncsymbol", "deseq_logfc", "deseq_adjp",
+                               "deseq_mean", "deseq_numerator", "deseq_denominator")
     write_xlsx(data = wanted_data, excel = filename)
   }
 }
 
-write_all_gp <- function(all_gp) {
+write_all_gp <- function(all_gp, suffix = NULL) {
+  all_written <- list()
   for (g in seq_len(length(all_gp))) {
     name <- names(all_gp)[g]
     datum <- all_gp[[name]]
-    filename <- glue("excel/macrophage_de/{ver}/gprofiler/{name}_gprofiler-v{ver}.xlsx")
+    filename <- glue("analyses/macrophage_de/gprofiler/{name}_gprofiler-v{ver}.xlsx")
+    if (!is.null(suffix)) {
+      filename <- glue("analyses/macrophage_de/gprofiler/{name}_gprofiler{suffix}-v{ver}.xlsx")
+    }
     written <- sm(write_gprofiler_data(datum, excel = filename))
+    all_written[[g]] <- written
   }
+  return(all_written)
 }
 ```
 
-### Primary queries
+## Primary queries
 
 There is a series of initial questions which make some sense
 to me, but these do not necessarily match the set of questions which
@@ -287,6 +312,19 @@ queries in one.
 Before extracting these groups of queries, let us invoke the
 all_pairwise() function and get all of the likely contrasts along with
 one or more extras that might prove useful (the 'extra' argument).
+
+The structure of these blocks will all basically be identical:
+
+* Perform a set of pairwise contrasts of all the conditions against
+  each other.  Optionally use sva.
+* Given that result, dump it in its entirety to an xlsx file in the
+  analyses/ directory.
+* Given those combined tables, extract from them the set deemed
+  'significant' by whatever criteria we want to try. (Usually |lfc| >=
+  1.0, adjusted p <= 0.05; but potentially also expression >= x and
+  sometimes a set of less stringent values (|lfc| >= 0.6))
+* Given one or more gene sets deemed 'significant' pass them to
+  gProfiler2 and see what pops out.
 
 ### Combined U937 and Macrophages: Compare drug effects
 
@@ -300,24 +338,33 @@ drug_de
 
 drug_table <- combine_de_tables(
   drug_de, keepers = tmrc2_drug_keepers,
-  excel = glue("excel/macrophage_de/{ver}/de_tables/macrophage_drug_comparison-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/macrophage_drug_comparison-v{ver}.xlsx"))
 drug_table
 combined_to_tsv(drug_table, celltype = "all")
 
 drug_sig <- extract_significant_genes(
   drug_table,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_drug_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_drug_sig-v{ver}.xlsx"))
 drug_sig
 drug_highsig <- extract_significant_genes(
   drug_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_drug_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_drug_highsig-v{ver}.xlsx"))
 drug_highsig
+drug_lesssig <- extract_significant_genes(
+  drug_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_drug_lesssig-v{ver}.xlsx"))
+drug_lesssig
 ```
 
+#### gProfiler2 results of the significant drug genes
+
 ```{r}
-all_drug_gp <- all_gprofiler(drug_sig)
+all_drug_gp <- all_gprofiler(drug_sig, enrich_id_column = "hgnc_symbol")
 all_drug_gp
-write_all_gp(all_drug_gp)
+written <- write_all_gp(all_drug_gp)
+
+all_drug_lesssig <- all_gprofiler(drug_lesssig, enrich_id_column = "hgnc_symbol")
+written <- write_all_gp(all_drug_lesssig, suffix = "_lfc0.6_")
 ```
 
 ### Combined U937 and Macrophages: compare cell types
@@ -330,23 +377,29 @@ compare all samples.
 * One might want to compare them with the interaction effects of drug/zymodeme.
 
 ```{r}
-type_de <- all_pairwise(all_human_types, filter = TRUE, model_batch = "svaseq", do_noiseq = FALSE)
+type_de <- all_pairwise(all_human_types, filter = TRUE,
+                        model_batch = "svaseq", do_noiseq = FALSE)
 type_de
 
 type_table <- combine_de_tables(
   type_de, keepers = tmrc2_type_keepers,
-  excel = glue("excel/macrophage_de/{ver}/de_tables/macrophage_type_comparison-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/macrophage_type_comparison-v{ver}.xlsx"))
 type_table
 combined_to_tsv(type_table, celltype = "all")
 
 type_sig <- extract_significant_genes(
   type_table,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_type_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_sig-v{ver}.xlsx"))
 type_sig
 type_highsig <- extract_significant_genes(
   type_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_type_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_highsig-v{ver}.xlsx"))
 type_highsig
+
+type_lesssig <- extract_significant_genes(
+  type_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_lesssig-v{ver}.xlsx"))
+type_sig
 ```
 
 #### Combined factors of interest: celltype+zymodeme
@@ -356,22 +409,27 @@ cell types, now let us look at the drug treatment+zymodeme status with
 all samples, macrophages and U937.
 
 ```{r}
-type_zymo_de <- all_pairwise(type_zymo, filter = TRUE, model_batch = "svaseq", do_noiseq = FALSE,
+type_zymo_de <- all_pairwise(type_zymo, filter = TRUE, model_batch = "svaseq",
+                             do_noiseq = FALSE,
                              extra_contrasts = type_zymo_extra)
 type_zymo_de
 
 type_zymo_table <- combine_de_tables(
   type_zymo_de, keepers = tmrc2_typezymo_keepers,
-  excel = glue("excel/macrophage_de/de_tables/macrophage_type_zymo_comparison-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/macrophage_type_zymo_comparison-v{ver}.xlsx"))
 combined_to_tsv(type_zymo_table, celltype = "all")
 
 type_zymo_sig <- extract_significant_genes(
   type_zymo_table,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_type_zymo_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_zymo_sig-v{ver}.xlsx"))
 type_zymo_sig
 type_zymo_highsig <- extract_significant_genes(
   type_zymo_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_type_zymo_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_zymo_highsig-v{ver}.xlsx"))
+type_zymo_lesssig <- extract_significant_genes(
+  type_zymo_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_zymo_lesssig-v{ver}.xlsx"))
+type_zymo_lesssig
 ```
 
 #### Combined factors of inteest: celltype+drug
@@ -384,17 +442,21 @@ type_drug_de <- all_pairwise(type_drug, filter = TRUE, model_batch = "svaseq")
 type_drug_de
 type_drug_table <- combine_de_tables(
   type_drug_de, keepers = tmrc2_typedrug_keepers,
-  excel = glue("excel/macrophage_de/{ver}/de_tables/macrophage_type_drug_comparison-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/macrophage_type_drug_comparison-v{ver}.xlsx"))
 type_drug_table
 combined_to_tsv(type_drug_table, celltype = "all")
 type_drug_sig <- extract_significant_genes(
   type_drug_table,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_type_drug_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_drug_sig-v{ver}.xlsx"))
 type_drug_sig
 type_drug_highsig <- extract_significant_genes(
   type_drug_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/{ver}/sig_tables/macrophage_type_drug_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_drug_highsig-v{ver}.xlsx"))
 type_drug_highsig
+type_drug_lesssig <- extract_significant_genes(
+  type_drug_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/macrophage_type_drug_lesssig-v{ver}.xlsx"))
+type_drug_lesssig
 ```
 
 # Individual cell types
@@ -417,13 +479,13 @@ interpretation, if so the most likely comparison is either:
 
 I am not sure those confuse me, and at least one of them is below
 
-### Macrophages
+## Macrophages
 
 In these blocks we will explicitly query only one factor at a time,
 drug and strain.  The eventual goal is to look for effects of
 drug treatment and/or strain treatment which are shared?
 
-#### Macrophage Drug only
+### Macrophage Drug only
 
 Thus we will start with the pure drug query.  In this block we will
 look only at the drug/nodrug effect.
@@ -433,21 +495,26 @@ hs_macr_drug_de <- all_pairwise(hs_macr_drug_expt, filter = TRUE, model_batch = 
 hs_macr_drug_de
 hs_macr_drug_table <- combine_de_tables(
   hs_macr_drug_de, keepers = tmrc2_drug_keepers,
-  excel = glue("excel/macrophage_de/macrophage_onlydrug_table-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/macrophage_onlydrug_table-v{ver}.xlsx"))
 hs_macr_drug_table
 combined_to_tsv(hs_macr_drug_table, celltype = "macrophage")
 
 hs_macr_drug_sig <- extract_significant_genes(
   hs_macr_drug_table,
-  excel = glue("excel/macrophage_de/macrophageonly_drug_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophageonly_drug_sig-v{ver}.xlsx"))
 hs_macr_drug_sig
 hs_macr_drug_highsig <- extract_significant_genes(
   hs_macr_drug_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/macrophageonly_drug_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophageonly_drug_highsig-v{ver}.xlsx"))
 hs_macr_drug_highsig
+
+## Creating the following to see how it affects gProfiler.
+hs_macr_drug_lesssig <- extract_significant_genes(
+  hs_macr_drug_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/macrophageonly_drug_sig_lfc0.6-v{ver}.xlsx"))
 ```
 
-#### Macrophage Strain only
+### Macrophage Strain only
 
 In a similar fashion, let us look for effects which are observed when
 we consider only the strain used during infection.
@@ -457,21 +524,26 @@ hs_macr_strain_de <- all_pairwise(hs_macr_strain_expt, filter = TRUE, model_batc
 hs_macr_strain_de
 hs_macr_strain_table <- combine_de_tables(
   hs_macr_strain_de, keepers = tmrc2_strain_keepers,
-  excel = glue("excel/macrophage_de/macrophage_onlystrain_table-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/macrophage_onlystrain_table-v{ver}.xlsx"))
 hs_macr_strain_table
 combined_to_tsv(hs_macr_strain_table, celltype = "macrophage")
 
 hs_macr_strain_sig <- extract_significant_genes(
   hs_macr_strain_table,
-  excel = glue("excel/macrophage_de/macrophageonly_onlystrain_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophageonly_onlystrain_sig-v{ver}.xlsx"))
 hs_macr_strain_sig
 hs_macr_strain_highsig <- extract_significant_genes(
   hs_macr_strain_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/macrophageonly_onlystrain_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/macrophageonly_onlystrain_highsig-v{ver}.xlsx"))
 hs_macr_strain_highsig
+
+hs_macr_strain_lesssig <- extract_significant_genes(
+  hs_macr_strain_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/macrophageonly_onlystrain_lesssig-v{ver}.xlsx"))
+hs_macr_strain_lesssig
 ```
 
-#### Compare Drug and Strain Effects
+### Compare Drug and Strain Effects
 
 Now let us consider the above two comparisons together.  First, I will
 plot the logFC values of them against each other (drug on x-axis and
@@ -489,7 +561,7 @@ drug_strain_comp_plot <- plot_linear_scatter(
 ## Contrasts: antimony/none, z23/z22; x-axis: drug, y-axis: strain
 ## top left: higher no drug, z23; top right: higher drug z23
 ## bottom left: higher no drug, z22; bottom right: higher drug z22
-drug_strain_comp_plot$scatter
+drug_strain_comp_plot[["scatter"]]
 ```
 
 As I noted in the comments above, some quadrants of the scatter plot
@@ -529,7 +601,7 @@ shared_genes_drug_z22 <- overlap_geneids(drug_z22_shared_genes, "drug:z22")
 shared_genes_drug_z22 <- attr(drug_z22_shared_genes, "elements")[drug_z22_shared_genes[["drug:z22"]]]
 ```
 
-#### Perform gProfiler on drug/strain effect shared genes
+### Perform gProfiler on drug/strain effect shared genes
 
 Now that we have some populations of genes which are shared across the
 drug/strain effects, let us pass them to some GSEA analyses and see
@@ -549,7 +621,7 @@ shared_drug_z22_gp <- simple_gprofiler(shared_genes_drug_z22)
 shared_drug_z22_gp[["pvalue_plots"]][["BP"]]
 ```
 
-## Our main question of interest
+# Our main question of interest
 
 The data structure hs_macr contains our primary macrophages, which
 are, as shown above, the data we can really sink our teeth into.
@@ -571,40 +643,163 @@ hs_macr_de <- all_pairwise(hs_macr, model_batch = "svaseq",
 hs_macr_de
 hs_single_table <- combine_de_tables(
   hs_macr_de, keepers = single_tmrc2_keeper,
-  excel = glue("excel/macrophage_de/hs_macr_drug_zymo_z22sb_sb-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/hs_macr_drug_zymo_z22sb_sb-v{ver}.xlsx"))
 hs_single_table
 hs_macr_table <- combine_de_tables(
   hs_macr_de, keepers = tmrc2_human_keepers,
-  excel = glue("excel/macrophage_de/hs_macr_drug_zymo_table_macr_only-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/hs_macr_drug_zymo_table_macr_only-v{ver}.xlsx"))
 hs_macr_table
 combined_to_tsv(hs_macr_table, "macrophage")
 
 hs_macr_sig <- extract_significant_genes(
   hs_macr_table,
-  excel = glue("excel/macrophage_de/hs_macr_drug_zymo_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/hs_macr_drug_zymo_sig-v{ver}.xlsx"))
 hs_macr_sig
 hs_macr_highsig <- extract_significant_genes(
   hs_macr_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/hs_macr_drug_zymo_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/hs_macr_drug_zymo_highsig-v{ver}.xlsx"))
 hs_macr_highsig
+hs_macr_lesssig <- extract_significant_genes(
+  hs_macr_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/hs_macr_drug_zymo_sig_lfc0.6-v{ver}.xlsx"))
+hs_macr_lesssig
 ```
 
 ## gene group upset
 
+### 2.3 vs 2.2 up and down vs. uninfected
+
+This is my version of the Venn diagram which includes the text:
+
+"Differentially expressed genes in macrophages infected with
+subpopulations 2.2 or 2.3.  Volcano plots contrast of: A. Venn diagram
+for upregulated and downregulated genes by infection with 2.3 and 2.2
+strains. B. infected cells with 2.3 strains and uninfected cells;
+C. infected cells with 2.2 strains and uninfected cells; D. infected
+cells with 2.3 strains and infected cells with 2.2 strains"
+
+The following upset plot is currently Figure 2E.
+
 ```{r}
 nodrug_upset <- upsetr_combined_de(hs_macr_table,
                                    desired_contrasts = c("z22nosb_vs_uninf", "z23nosb_vs_uninf"))
-pp(file = "images/nodrug_upset.png")
+pp(file = "images/nodrug_upset.svg")
+nodrug_upset[["plot"]]
+dev.off()
 nodrug_upset
-dev.off()
-drug_upset <- upsetr_combined_de(hs_macr_table,
-                                 desired_contrasts = c("z22sb_vs_sb", "z23sb_vs_sb"))
-pp(file = "images/drug_upset.png")
-drug_upset
-dev.off()
 ```
 
-# Significance barplot of interest
+#### A point of interest while Olga visits Umd
+
+Najib and Olga asked about pulling the 9 gene IDs which are in the
+peculiar situation of increased expression in z2.2/uninf and decreased
+in z2.3/uninf.  In the previous upset plot, these are visible in the
+6th bar.  I can access these via the attr() function, which I should
+admit I can never remember how to use, so I am going to use the code
+under the 'Compare(no)Sb z2.3/z2.2 treatment' heading to remember how
+to extract these genes.
+
+```{r}
+all_groups <- nodrug_upset[["groups"]]
+wanted_group <- "z23nosb_vs_uninf_down:z22nosb_vs_uninf_up"
+gene_idx <- all_groups[[wanted_group]]
+wanted_genes <- attr(all_groups, "elements")[gene_idx]
+wanted_genes
+gene_symbol_idx <- rownames(fData(hs_macr)) %in% as.character(wanted_genes)
+fData(hs_macr)[gene_symbol_idx, "hgnc_symbol"]
+```
+
+* ABCB5: ATB Binding Cassette Subfamily B Member #5, wide range of
+  functions in this diverse paralogous family.  Associated with skin
+  diseases (melanoma and Epidermolysis Bullosa; participate in
+  ATP-dependent transmembrane transport).
+* RFX4: Regulatory Factor X #4: transcription factor.
+* CA14: Carbonic anhydrase #14: Zync metalloenzyme catalyzes
+  reversible hydration of CO2.  This gene looks pretty neat, but not
+  really relevant to anything we are likely to care about.
+* EGR1: Early Growth Response Protein #1: Another Tx factor
+  (zinc-finger) -- important for cell survival/proliferation/cell
+  death.  Presumably important for healing?
+* MCF2L: MCF.2 Cell Line Derived Transforming Sequence Like?  guanine
+  nucleotide exchange factor interacting with GTP-bound Rac1.
+  Apparently associated with ostroarthritis; potentially relevant to
+  regulation of RHOA and CDC42 signalling.
+* DNASE1L3: Deoxyribonuclease I family member: not inhibited by actin,
+  breaks down DNA during apoptosis.  Important during necrosis.
+* FOS: Proto-Oncogene, AP-1 Transcription Factor: leucine zipper
+  dimerizes with JUN family proteins, forming tx factor complex AP-1.
+  Important for cell proliferation, differentiation, and
+  transformation.
+* IFITM10: Interferon-Induced Transmembrane Protein #10
+* PKD1L3: Polycystin 1 Like #3, Transient Receptor Potential Channel
+  Interacting: 11 transmembrane domain protein which might help create
+  cation channels.
+
+As some comparison points, the Venn in the current figure has:
+
+* 387 up z2.3
+* 259 up z2.2
+* 83 shared up z2.3 and z2.2
+* 247 down z2.3
+* 3 down z2.2
+* 3 shared down z2.3 and z2.2
+
+### 2.2 and 2.3 with SbV vs 2.2 and 2.3 without SbV
+
+This is my version of the Venn with the text:
+
+"Differentially expressed genes in macrophages infected with
+subpopulations 2.2 or 2.3, in presence of SbV. Volcano plots contrast
+of: A. infected cells with 2.3 strains + SbV and infected cells with
+2.3 strains; B. infected cells with 2.2 strains + SbV and infected
+cells with 2.2 strains; C. infected cells with 2.3 strains + SbV and
+infected cells with 2.2 strains + SbV. D. Venn diagram for upregulated
+and downregulated genes by infection with 2.3+SbV and 2.2+SbV
+strains."
+
+A query from Olga (20240801): Please include in the upset in figure 3
+the contrast of uninfected cells + SbV vs uninfected without SbV.
+
+```{r}
+## I keep mis-interpreting this text, it is z2.3/z2.3SbV and z2.2/z2.2SbV
+drugnodrug_upset <- upsetr_combined_de(hs_macr_table,
+                                       desired_contrasts = c("z23sb_vs_z23nosb", "z22sb_vs_z22nosb"))
+pp(file = "images/drugnodrug_upset.pdf")
+drugnodrug_upset[["plot"]]
+dev.off()
+drugnodrug_upset
+
+drugnodrug_uninf_contrasts <- c("z23sb_vs_z23nosb", "z22sb_vs_z22nosb", "sb_vs_uninf")
+drugnodrug_upset_with_uninf <- upsetr_combined_de(hs_macr_table,
+                                       desired_contrasts = drugnodrug_uninf_contrasts)
+pp(file = "figures/drugnodrug_with_uninf_upset.svg")
+drugnodrug_upset_with_uninf[["plot"]]
+dev.off()
+drugnodrug_upset_with_uninf
+```
+
+For some comparison points, the venn image has:
+
+* 222 up z2.3 SbV
+* 134 up z2.2 SbV
+* 182 down z2.3 SbV
+* 396 down z2.2 SbV
+* 605 shared down z2.2 and z2.3 SbV
+* 34 shared down z2.2 SbV and up z2.3 SbV
+* 363 shared up z2.2 SbV and z2.3 SbV
+
+### Compare z2.2SbV vs SbV and z2.3SbV and SbV
+
+```{r}
+drug_upset <- upsetr_combined_de(hs_macr_table,
+                                 desired_contrasts = c("z22sb_vs_sb", "z23sb_vs_sb"))
+pp(file = "images/drug_upset.pdf")
+drug_upset[["plot"]]
+dev.off()
+drug_upset
+```
+
+## Significance barplot of interest
 
 Olga kindly sent a set of particularly interesting contrasts and
 colors for a significance barplot, they include the following:
@@ -639,7 +834,7 @@ barplot_keepers <- list(
   "sb_vs_uninf" = c("uninfsbnone", "uninfnone"))
 barplot_combined <- combine_de_tables(
   hs_macr_de, keepers = barplot_keepers,
-  excel = glue("excel/macrophage_de/hs_macr_drug_zymo_7contrasts-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/hs_macr_drug_zymo_7contrasts-v{ver}.xlsx"))
 ```
 
 Now let us use the colors suggested by Olga to make a barplot of
@@ -649,7 +844,7 @@ these...
 color_list <-  c( "#de8bf9", "#ad07e3","#410257", "#ffa0a0", "#f94040", "#a00000")
 barplot_sig <- extract_significant_genes(
   barplot_combined, color_list = color_list, according_to = "deseq",
-  excel = glue("excel/macrophage_de/hs_macr_drug_zymo_7contrasts_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/hs_macr_drug_zymo_7contrasts_sig-v{ver}.xlsx"))
 barplot_sig
 ```
 
@@ -664,15 +859,13 @@ In order to use proper, one must feed it one or more DE tables.
 
 ```{r}
 power_estimate <- simple_proper(hs_single_table)
-power_estimate
 
 power_estimate[[1]][["power_plot"]]
 power_estimate[[1]][["powertd_plot"]]
 power_estimate[[1]][["powerfd_plot"]]
-
 ```
 
-### Our main questions in U937
+# Our main questions in U937
 
 Let us do the same comparisons in the U937 samples, though I will not
 do the extra contrasts, primarily because I think the dataset is less
@@ -684,21 +877,29 @@ u937_de <- all_pairwise(u937_expt, model_batch = "svaseq",
 u937_de
 u937_table <- combine_de_tables(
   u937_de, keepers = u937_keepers,
-  excel = glue("excel/macrophage_de/u937_drug_zymo_table-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/u937_drug_zymo_table-v{ver}.xlsx"))
 u937_table
 combined_to_tsv(u937_table, celltype = "u937")
 
 u937_sig <- extract_significant_genes(
   u937_table,
-  excel = glue("excel/macrophage_de/u937_drug_zymo_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/u937_drug_zymo_sig-v{ver}.xlsx"))
 u937_sig
 u937_highsig <- extract_significant_genes(
   u937_table, min_mean_exprs = high_expression, exprs_column = high_expression_column,
-  excel = glue("excel/macrophage_de/u937_drug_zymo_highsig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/u937_drug_zymo_highsig-v{ver}.xlsx"))
 u937_highsig
+u937_lesssig <- extract_significant_genes(
+  u937_table, lfc = 0.6,
+  excel = glue("analyses/macrophage_de/sig_tables/u937_drug_zymo_lesssig-v{ver}.xlsx"))
+u937_lesssig
 ```
 
-#### Compare (no)Sb z2.3/z2.2 treatments among macrophages
+# Compare (no)Sb z2.3/z2.2 treatments among macrophages
+
+In the following block, I will jump back to the macrophage samples and
+look for genes which are shared/unique when comparing z2.3/z2.2
+for the drug treated samples and the untreated samples.
 
 ```{r}
 upset_plots_hs_macr <- upsetr_sig(
@@ -721,7 +922,9 @@ drugonly_gp <- simple_gprofiler(drug_genes)
 drugonly_gp[["pvalue_plots"]][["BP"]]
 ```
 
-I want to try something, directly include the u937 data in this...
+I want to try something, directly include the u937 data in this.
+Thus, in the following block I will repeat but compare all samples and
+the U937 using the same logic.
 
 ```{r}
 both_sig <- hs_macr_sig
@@ -738,51 +941,54 @@ upset_plots_both <- upsetr_sig(
   both_sig, both = TRUE,
   contrasts = c("macr_z23sb_vs_z22sb", "macr_z23nosb_vs_z22nosb",
                 "u937_z23sb_vs_z22sb", "u937_z23nosb_vs_z22nosb"))
-upset_plots_both$both
+upset_plots_both[["both"]]
 ```
 
-#### Compare DE results from macrophages and U937 samples
+## Compare DE results from macrophages and U937 samples
 
 Looking a bit more closely at these, I think the u937 data is too
 sparse to effectively compare.
 
 ```{r}
 macr_u937_comparison <- compare_de_results(hs_macr_table, u937_table)
-macr_u937_comparison$lfc_heat
+macr_u937_comparison[["lfc_heat"]]
 
 macr_u937_venns <- compare_significant_contrasts(hs_macr_sig, second_sig_tables = u937_sig,
                                                  contrasts = "z23sb_vs_z23nosb")
-macr_u937_venns$up_plot
-macr_u937_venns$down_plot
+macr_u937_venns[["up_plot"]]
+macr_u937_venns[["down_plot"]]
 
-macr_u937_venns_v2 <- compare_significant_contrasts(hs_macr_sig, second_sig_tables = u937_sig,
-                                                    contrasts = "z22sb_vs_z22nosb")
-macr_u937_venns_v2$up_plot
-macr_u937_venns_v2$down_plot
+macr_u937_venns_v2 <- compare_significant_contrasts(
+  hs_macr_sig, second_sig_tables = u937_sig, contrasts = "z22sb_vs_z22nosb")
+macr_u937_venns_v2[["up_plot"]]
+macr_u937_venns_v2[["down_plot"]]
 
-macr_u937_venns_v3 <- compare_significant_contrasts(hs_macr_sig, second_sig_tables = u937_sig,
-                                                    contrasts = "sb_vs_uninf")
-macr_u937_venns_v3$up_plot
-macr_u937_venns_v3$down_plot
+macr_u937_venns_v3 <- compare_significant_contrasts(
+  hs_macr_sig, second_sig_tables = u937_sig, contrasts = "sb_vs_uninf")
+macr_u937_venns_v3[["up_plot"]]
+macr_u937_venns_v3[["down_plot"]]
 ```
 
-### Compare macrophage/u937 with respect to z2.3/z2.2
+## Compare macrophage/u937 with respect to z2.3/z2.2
 
 ```{r}
 comparison_df <- merge(hs_macr_table[["data"]][["z23sb_vs_z22sb"]],
                        u937_table[["data"]][["z23sb_vs_z22sb"]],
                        by = "row.names")
 macru937_z23z22_plot <- plot_linear_scatter(comparison_df[, c("deseq_logfc.x", "deseq_logfc.y")])
-macru937_z23z22_plot$scatter
+macru937_z23z22_plot[["scatter"]]
 
 comparison_df <- merge(hs_macr_table[["data"]][["z23nosb_vs_z22nosb"]],
                        u937_table[["data"]][["z23nosb_vs_z22nosb"]],
                        by = "row.names")
 macru937_z23z22_plot <- plot_linear_scatter(comparison_df[, c("deseq_logfc.x", "deseq_logfc.y")])
-macru937_z23z22_plot$scatter
+macru937_z23z22_plot[["scatter"]]
 ```
 
-#### Add donor to the contrasts, no sva
+# Add donor to the contrasts, no sva
+
+In the following block, I will change the sample condition to include
+the donor.
 
 ```{r}
 no_power_fact <- paste0(pData(hs_macr)[["donor"]], "_",
@@ -790,7 +996,7 @@ no_power_fact <- paste0(pData(hs_macr)[["donor"]], "_",
 table(pData(hs_macr)[["donor"]])
 table(no_power_fact)
 hs_nopower <- set_expt_conditions(hs_macr, fact = no_power_fact)
-hs_nopower <- subset_expt(hs_nopower, subset="macrophagezymodeme!='none'")
+hs_nopower <- subset_expt(hs_nopower, subset = "macrophagezymodeme!='none'")
 hs_nopower_nosva_de <- all_pairwise(hs_nopower, model_batch = FALSE, filter = TRUE)
 nopower_keepers <- list(
   "d01_zymo" = c("d01infz23", "d01infz22"),
@@ -803,54 +1009,56 @@ nopower_keepers <- list(
   "d81_sbzymo" = c("d81infsbz23", "d81infsbz22"))
 hs_nopower_nosva_table <- combine_de_tables(
   hs_nopower_nosva_de, keepers = nopower_keepers,
-  excel = glue("excel/macrophage_de/hs_nopower_table-v{ver}.xlsx"))
-##                                  extra_contrasts = extra)
+  excel = glue("analyses/macrophage_de/de_tables/hs_nopower_table-v{ver}.xlsx"))
+## extra_contrasts = extra)
 hs_nopower_nosva_sig <- extract_significant_genes(
   hs_nopower_nosva_table,
-  excel = glue("excel/macrophage_de/hs_nopower_nosva_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/hs_nopower_nosva_sig-v{ver}.xlsx"))
 
 d01d02_zymo_nosva_comp <- merge(hs_nopower_nosva_table[["data"]][["d01_zymo"]],
                                 hs_nopower_nosva_table[["data"]][["d02_zymo"]],
-                                by="row.names")
+                                by = "row.names")
 d0102_zymo_nosva_plot <- plot_linear_scatter(d01d02_zymo_nosva_comp[, c("deseq_logfc.x", "deseq_logfc.y")])
-d0102_zymo_nosva_plot$scatter
-d0102_zymo_nosva_plot$correlation
-d0102_zymo_nosva_plot$lm_rsq
+d0102_zymo_nosva_plot[["scatter"]]
+d0102_zymo_nosva_plot[["correlation"]]
+d0102_zymo_nosva_plot[["lm_rsq"]]
 
 d09d81_zymo_nosva_comp <- merge(hs_nopower_nosva_table[["data"]][["d09_zymo"]],
                                 hs_nopower_nosva_table[["data"]][["d81_zymo"]],
-                                by="row.names")
+                                by = "row.names")
 d0981_zymo_nosva_plot <- plot_linear_scatter(d09d81_zymo_nosva_comp[, c("deseq_logfc.x", "deseq_logfc.y")])
-d0981_zymo_nosva_plot$scatter
-d0981_zymo_nosva_plot$correlation
-d0981_zymo_nosva_plot$lm_rsq
+d0981_zymo_nosva_plot[["scatter"]]
+d0981_zymo_nosva_plot[["correlation"]]
+d0981_zymo_nosva_plot[["lm_rsq"]]
 
 d01d81_zymo_nosva_comp <- merge(hs_nopower_nosva_table[["data"]][["d01_zymo"]],
                                 hs_nopower_nosva_table[["data"]][["d81_zymo"]],
-                                by="row.names")
+                                by = "row.names")
 d0181_zymo_nosva_plot <- plot_linear_scatter(d01d81_zymo_nosva_comp[, c("deseq_logfc.x", "deseq_logfc.y")])
-d0181_zymo_nosva_plot$scatter
-d0181_zymo_nosva_plot$correlation
-d0181_zymo_nosva_plot$lm_rsq
+d0181_zymo_nosva_plot[["scatter"]]
+d0181_zymo_nosva_plot[["correlation"]]
+d0181_zymo_nosva_plot[["lm_rsq"]]
 
-upset_plots_nosva <- upsetr_sig(hs_nopower_nosva_sig, both=TRUE,
-                                contrasts=c("d01_zymo", "d02_zymo", "d09_zymo", "d81_zymo"))
-upset_plots_nosva$up
-upset_plots_nosva$down
-upset_plots_nosva$both
+upset_plots_nosva <- upsetr_sig(hs_nopower_nosva_sig, both = TRUE,
+                                contrasts = c("d01_zymo", "d02_zymo", "d09_zymo", "d81_zymo"))
+upset_plots_nosva[["up"]]
+upset_plots_nosva[["down"]]
+upset_plots_nosva[["both"]]
 ## The 7th element in the both groups list is the set shared among all donors.
 ## I don't feel like writing out x:y:z:a
 groups <- upset_plots_nosva[["both_groups"]]
 shared_genes <- attr(groups, "elements")[groups[[7]]] %>%
   gsub(pattern = "^gene:", replacement = "")
 shared_gp <- simple_gprofiler(shared_genes)
-shared_gp$pvalue_plots$MF
-shared_gp$pvalue_plots$BP
-shared_gp$pvalue_plots$REAC
-shared_gp$pvalue_plots$WP
+shared_gp[["pvalue_plots"]][["MF"]]
+shared_gp[["pvalue_plots"]][["BP"]]
+shared_gp[["pvalue_plots"]][["REAC"]]
+shared_gp[["pvalue_plots"]][["WP"]]
 ```
 
-#### Add donor to the contrasts, sva
+# Add donor to the contrasts, sva
+
+Same deal as the last block, but this time add SVA into the mix!
 
 ```{r}
 hs_nopower_sva_de <- all_pairwise(hs_nopower, model_batch = "svaseq", filter = TRUE)
@@ -865,70 +1073,72 @@ nopower_keepers <- list(
   "d81_sbzymo" = c("d81infsbz23", "d81infsbz22"))
 hs_nopower_sva_table <- combine_de_tables(
   hs_nopower_sva_de, keepers = nopower_keepers,
-  excel = glue("excel/macrophage_de/hs_nopower_table-v{ver}.xlsx"))
-##                                  extra_contrasts = extra)
+  excel = glue("analyses/macrophage_de/de_tables/hs_nopower_table-v{ver}.xlsx"))
+## extra_contrasts = extra)
 hs_nopower_sva_sig <- extract_significant_genes(
   hs_nopower_sva_table,
-  excel = glue("excel/macrophage_de/hs_nopower_sva_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/hs_nopower_sva_sig-v{ver}.xlsx"))
 
 d01d02_zymo_sva_comp <- merge(hs_nopower_sva_table[["data"]][["d01_zymo"]],
                               hs_nopower_sva_table[["data"]][["d02_zymo"]],
-                              by="row.names")
+                              by = "row.names")
 d0102_zymo_sva_plot <- plot_linear_scatter(d01d02_zymo_sva_comp[, c("deseq_logfc.x", "deseq_logfc.y")])
-d0102_zymo_sva_plot$scatter
-d0102_zymo_sva_plot$correlation
-d0102_zymo_sva_plot$lm_rsq
+d0102_zymo_sva_plot[["scatter"]]
+d0102_zymo_sva_plot[["correlation"]]
+d0102_zymo_sva_plot[["lm_rsq"]]
 
 d09d81_zymo_sva_comp <- merge(hs_nopower_sva_table[["data"]][["d09_zymo"]],
                               hs_nopower_sva_table[["data"]][["d81_zymo"]],
-                              by="row.names")
+                              by = "row.names")
 d0981_zymo_sva_plot <- plot_linear_scatter(d09d81_zymo_sva_comp[, c("deseq_logfc.x", "deseq_logfc.y")])
-d0981_zymo_sva_plot$scatter
-d0981_zymo_sva_plot$correlation
-d0981_zymo_sva_plot$lm_rsq
+d0981_zymo_sva_plot[["scatter"]]
+d0981_zymo_sva_plot[["correlation"]]
+d0981_zymo_sva_plot[["lm_rsq"]]
 
 d01d81_zymo_sva_comp <- merge(hs_nopower_sva_table[["data"]][["d01_zymo"]],
                               hs_nopower_sva_table[["data"]][["d81_zymo"]],
-                              by="row.names")
+                              by = "row.names")
 d0181_zymo_sva_plot <- plot_linear_scatter(d01d81_zymo_sva_comp[, c("deseq_logfc.x", "deseq_logfc.y")])
-d0181_zymo_sva_plot$scatter
-d0181_zymo_sva_plot$correlation
-d0181_zymo_sva_plot$lm_rsq
+d0181_zymo_sva_plot[["scatter"]]
+d0181_zymo_sva_plot[["correlation"]]
+d0181_zymo_sva_plot[["lm_rsq"]]
 
-upset_plots_sva <- upsetr_sig(hs_nopower_sva_sig, both=TRUE,
-                              contrasts=c("d01_zymo", "d02_zymo", "d09_zymo", "d81_zymo"))
-upset_plots_sva$up
-upset_plots_sva$down
-upset_plots_sva$both
+upset_plots_sva <- upsetr_sig(hs_nopower_sva_sig, both = TRUE,
+                              contrasts = c("d01_zymo", "d02_zymo", "d09_zymo", "d81_zymo"))
+upset_plots_sva[["up"]]
+upset_plots_sva[["down"]]
+upset_plots_sva[["both"]]
 ## The 7th element in the both groups list is the set shared among all donors.
 ## I don't feel like writing out x:y:z:a
 groups <- upset_plots_sva[["both_groups"]]
 shared_genes <- attr(groups, "elements")[groups[[7]]] %>%
   gsub(pattern = "^gene:", replacement = "")
 shared_gp <- simple_gprofiler(shared_genes)
-shared_gp$pvalue_plots$MF
-shared_gp$pvalue_plots$BP
-shared_gp$pvalue_plots$REAC
-shared_gp$pvalue_plots$WP
+shared_gp[["pvalue_plots"]][["MF"]]
+shared_gp[["pvalue_plots"]][["BP"]]
+shared_gp[["pvalue_plots"]][["REAC"]]
+shared_gp[["pvalue_plots"]][["WP"]]
 ```
 
-### Donor comparison
+# Donor comparison
+
+Now compare the donors to each other directly.
 
 ```{r}
 hs_donors <- set_expt_conditions(hs_macr, fact = "donor")
-donor_de <- all_pairwise(hs_donors, model_batch="svaseq", filter=TRUE)
+donor_de <- all_pairwise(hs_donors, model_batch = "svaseq", filter = TRUE)
 donor_de
 donor_table <- combine_de_tables(
   donor_de,
-  excel=glue("excel/macrophage_de/donor_tables-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/donor_tables-v{ver}.xlsx"))
 donor_table
 donor_sig <- extract_significant_genes(
   donor_table,
-  excel = glue("excel/macrophage_de/donor_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/donor_sig-v{ver}.xlsx"))
 donor_sig
 ```
 
-#### Primary query contrasts
+# Primary query contrasts
 
 The final contrast in this list is interesting because it depends on
 the extra contrasts applied to the all_pairwise() above.  In my way of
@@ -936,7 +1146,7 @@ thinking, the primary comparisons to consider are either cross-drug or
 cross-strain, but not both.  However I think in at least a few
 instances Olga is interested in strain+drug / uninfected+nodrug.
 
-#### Write contrast results
+## Write contrast results
 
 Now let us write out the xlsx file containing the above contrasts.
 The file with the suffix _table-version will therefore contain all
@@ -944,7 +1154,7 @@ genes and the file with the suffix _sig-version will contain only
 those deemed significant via our default criteria of DESeq2 |logFC| >= 1.0
 and adjusted p-value <= 0.05.
 
-# Over representation searches
+## Over representation searches
 
 I decided to make one initially small, but I think quickly big change
 to the organization of this document:  I am moving the GSEA searches
@@ -952,17 +1162,59 @@ up to immediately after the DE.  I will then move the plots of the
 gprofiler results to immediately after the various volcano plots so
 that it is easier to interpret them.
 
+I am reasonably certain this is the place to check that z23no drug /
+uninfected has the expected set of genes and that there is or is not a
+reactome result.
+
+Reproducibility note: Given that this is entirely dependent on an
+online service, I must assume that the results will change over time;
+in addition their web servers undergo maintenance regularly, which may
+result in systematic failure of these analyses.  I like gProfiler
+quite a lot for this type of stuff, but this is an important caveat.
+
+Conversely, the clusterProfiler results later depend on a consistent
+orgdb annotation set (or reactome or whatever); those versions are
+fixed by the container installation.
+
 ```{r}
-all_gp <- all_gprofiler(hs_macr_sig)
+all_gp <- all_gprofiler(hs_macr_sig, enrich_id_column = "hgncsymbol")
 for (g in seq_len(length(all_gp))) {
   name <- names(all_gp)[g]
   datum <- all_gp[[name]]
-  filename <- glue("excel/macrophage_de/gprofiler/{name}_gprofiler-v{ver}.xlsx")
+  filename <- glue("analyses/macrophage_de/gprofiler/{name}_gprofiler-v{ver}.xlsx")
   written <- sm(write_gprofiler_data(datum, excel = filename))
 }
 ```
 
-# Plot contrasts of interest
+## Explicit GSEA search vis clusterProfiler
+
+```{r}
+all_cp <- all_cprofiler(hs_macr_sig, hs_macr_table)
+```
+
+## Specific desires in Reactome results
+
+In previous analyses (I think by Dr. Colmenares), a specific
+Tryptophan biosynthesis pathway was observed.  Partciularly in the
+2.3/uninfected comparison.  I think my gprofiler analysis is too
+stringent and therefore not observing this.  Olga asked if I could
+look at that and see if there are trivial settings I can change to
+highlight this pathway.  The two most likely things I can change are
+the stringencies of the DE analysis and/or gProfiler.
+
+```{r}
+test_z23_uninf_up <- hs_macr_sig[["deseq"]][["ups"]][["z23nosb_vs_uninf"]]
+nrow(test_z23_uninf_up)
+test_z23_uninf_down <- hs_macr_sig[["deseq"]][["downs"]][["z23nosb_vs_uninf"]]
+nrow(test_z23_uninf_down)
+
+test_gp_up <- simple_gprofiler(test_z23_uninf_up, enrich_id_column = "hgncsymbol")
+test_gp_up
+test_gp_down <- simple_gprofiler(test_z23_uninf_down, enrich_id_column = "hgncsymbol")
+test_gp_down
+```
+
+## Plot contrasts of interest
 
 One suggestion I received recently was to set the axes for these
 volcano plots to be static rather than let ggplot choose its own.  I
@@ -971,37 +1223,43 @@ might not be true.
 
 ## Individual zymodemes vs. uninfected
 
+The following blocks will be a lot of repetition.  In each case I am
+yanking out the volcano plot for a specific contrast and showing the
+original followed by a version with different colors/labelling.
+
 ### Infected with z2.3 no Antimonial vs. Uninfected
 
 ```{r}
 plot_colors <- get_expt_colors(hs_macr_table[["input"]][["input"]])
-x_limits <- c(-20, 10)
 
 ## The original plot from my xlsx file
-hs_macr_table$plots$z23nosb_vs_uninf$deseq_vol_plots
+hs_macr_table[["plots"]][["z23nosb_vs_uninf"]][["deseq_vol_plots"]]
 
 z23nosb_vs_uninf_volcano <- plot_volcano_condition_de(
   input = hs_macr_table[["data"]][["z23nosb_vs_uninf"]],
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["uninfnone"]], color_low = plot_colors[["infz23"]])
-z23nosb_vs_uninf_volcano$plot +
-  scale_x_continuous(limits = x_limits)
-plotly::ggplotly(z23nosb_vs_uninf_volcano$plot)
+  label = 10, label_column = "hgncsymbol",
+  color_low = plot_colors[["uninfnone"]], color_high = plot_colors[["infz23"]])
 
-z23nosb_vs_uninf_volcano_nol <- plot_volcano_condition_de(
-  input = hs_macr_table[["data"]][["z23nosb_vs_uninf"]],
-  fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = NULL, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["uninfnone"]], color_low = plot_colors[["infz23"]])
-z23nosb_vs_uninf_volcano_nol$plot +
-  scale_x_continuous(limits = x_limits)
+labeled <- z23nosb_vs_uninf_volcano[["plot"]] +
+  scale_x_continuous(limits = c(-6, 21), breaks = c(-6, -4, -2, 0, 2, 4, 6, 8, 10, 20)) +
+  ggbreak::scale_x_break(c(10, 19), scales = 0.2, space = 0.02)
+pp(file = "figures/fig2a_labeled_with_break.svg")
+labeled
+dev.off()
+labeled
 
+plotly::ggplotly(z23nosb_vs_uninf_volcano[["plot"]])
+```
+
+The following provides some of the over-representation plots from gProfiler2.
+
+```{r}
 all_gp[["z23nosb_vs_uninf_up"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.3 without drug vs. uninfected without drug, up.
 all_gp[["z23nosb_vs_uninf_up"]][["pvalue_plots"]][["KEGG"]]
 ## KEGG, zymodeme2.3 without drug vs. uninfected without drug, up.
-all_gp[["z23nosb_vs_uninf_up"]][["pvalue_plots"]][["MF"]]
+##all_gp[["z23nosb_vs_uninf_up"]][["pvalue_plots"]][["MF"]]
 ## MF, zymodeme2.3 without drug vs. uninfected without drug, up.
 all_gp[["z23nosb_vs_uninf_up"]][["pvalue_plots"]][["TF"]]
 ## TF, zymodeme2.3 without drug vs. uninfected without drug, up.
@@ -1011,35 +1269,117 @@ all_gp[["z23nosb_vs_uninf_up"]][["interactive_plots"]][["WP"]]
 
 all_gp[["z23nosb_vs_uninf_down"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.3 without drug vs. uninfected without drug, down.
-all_gp[["z23nosb_vs_uninf_down"]][["pvalue_plots"]][["MF"]]
+##all_gp[["z23nosb_vs_uninf_down"]][["pvalue_plots"]][["MF"]]
 ## MF, zymodeme2.3 without drug vs. uninfected without drug, down.
 all_gp[["z23nosb_vs_uninf_down"]][["pvalue_plots"]][["TF"]]
 ## TF, zymodeme2.3 without drug vs. uninfected without drug, down.
 ```
 
+We have some other categorical enrichment plots available via
+enrichplot, let us try a few out for contrasts of interest and see if
+any of them prove helpful.
+
+First, as a reminder, here are the contrasts which are available to
+examine, in each case there is an _up and _down enrichment object in
+the data.  Thus in the following list I am going to arbitrarily print
+out some invocations which extract putatively interesting bits of data.
+
+* z23nosb_vs_uninf: all_gp[["z23nosb_vs_uninf_up"]][["BP_enrich"]]
+* z22nosb_vs_uninf.
+* z23nosb_vs_z22nosb.
+* z23sb_vs_z22sb.
+* z23sb_vs_z23nosb.
+* z22sb_vs_z22nosb.
+* z23sb_vs_sb.
+* z22sb_vs_sb.
+* z23sb_vs_uninf.
+* z22sb_vs_uninf.
+* sb_vs_uninf.
+* extra_z2322.
+* extra_drugnodrug.
+
+```{r}
+z23nosb_uninf_up_go <- all_gp[["z23nosb_vs_uninf_up"]][["BP_enrich"]]
+z23nosb_uninf_up_go_pair <- pairwise_termsim(z23nosb_uninf_up_go)
+dotplot(z23nosb_uninf_up_go)
+emapplot(z23nosb_uninf_up_go_pair)
+##ssplot(z23nosb_uninf_up_go_pair)
+treeplot(z23nosb_uninf_up_go_pair)
+upsetplot(z23nosb_uninf_up_go)
+cnetplot(z23nosb_uninf_up_go)
+```
+
+### Repeat, but using a less strict set of 'significant genes'
+
+I am not entirely certain if the Reactome results Olga showed me
+included both up and down genes?  I am going to assume for the moment
+that it was just up/down, but if that proves intractable I will go
+back to the manuscript and read more carefully (e.g. I just remembered
+where the picture came from!)
+
+#### Add a little topgo
+
+In the process of exploring the various parameters used with
+gProfiler2, I found myself thinking that it would be nice to have some
+topgo results to compare against.  The following block is the result
+of that thought.
+
+```{r}
+test_genes_up <- hs_macr_lesssig[["deseq"]][["ups"]][["z23nosb_vs_uninf"]]
+test_query_up <- simple_gprofiler(test_genes_up, threshold = 0.1)
+test_query_up[["pvalue_plots"]][["REAC"]]
+pdf(file = "images/test_query_biological_process_z23_vs_uninf_up.pdf", height = 12, width = 9)
+test_query_up[["pvalue_plots"]][["BP"]]
+dev.off()
+enrichplot::dotplot(test_query_up[["BP_enrich"]])
+test_genes_down <- hs_macr_lesssig[["deseq"]][["downs"]][["z23nosb_vs_uninf"]]
+test_query_down <- simple_gprofiler(test_genes_down)
+test_query_down[["pvalue_plots"]][["REAC"]]
+
+## I keep getting all sorts of annoying biomart errors.
+hs_go <- try(load_biomart_go(archive = FALSE, overwrite = TRUE))
+if ("try-error" %in% class(hs_go)) {
+  hs_go <- load_biomart_go(archive = TRUE, month = "04", year = "2020", overwrite = TRUE)
+}
+test_topgo_up <- simple_topgo(test_genes_up, go_db = hs_go[["go"]], parallel = FALSE)
+written_topgo <- write_topgo_data(
+  test_topgo_up,
+  excel = glue("analyses/macrophage_de/ontology_topgo/topgo_z23_uninf_less_strict.xlsx"))
+```
+
 ### Infected with z2.2 no Antimonial vs. Uninfected
+
+Here is where things will get most repetitive.  In each instance I am
+creating a couple of volcano plots followed by printing some of the
+gProfiler2 results (when I get the itch).
+
+The following should be a slightly improved version of our extant
+figure 2B.
 
 ```{r}
 ## The original plot
-hs_macr_table$plots$z22nosb_vs_uninf$deseq_vol_plots
+hs_macr_table[["plots"]][["z22nosb_vs_uninf"]][["deseq_vol_plots"]]
 
 z22nosb_vs_uninf_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z22nosb_vs_uninf"]], "z22nosb_vs_uninf",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["uninfnone"]], color_low = plot_colors[["infz22"]])
-z22nosb_vs_uninf_volcano$plot +
-  scale_x_continuous(limits = x_limits)
-plotly::ggplotly(z22nosb_vs_uninf_volcano$plot)
+  label = 10, label_column = "hgncsymbol",
+  color_low = plot_colors[["uninfnone"]], color_high = plot_colors[["infz22"]])
 
-z22nosb_vs_uninf_volcano_nol <- plot_volcano_condition_de(
-  hs_macr_table[["data"]][["z22nosb_vs_uninf"]], "z22nosb_vs_uninf",
-  fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = NULL, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["uninfnone"]], color_low = plot_colors[["infz22"]])
-z22nosb_vs_uninf_volcano_nol$plot +
-  scale_x_continuous(limits = x_limits)
+labeled <- z22nosb_vs_uninf_volcano[["plot"]] +
+  scale_x_continuous(limits = c(-2, 21), breaks = c(-2, 0, 2, 4, 6, 8, 10, 21, 22)) +
+  ggbreak::scale_x_break(c(11, 20), scales = 0.2, space = 0.02)
+pp(file = "figures/fig2b_labeled_with_break.svg")
+labeled
+dev.off()
+labeled
 
+plotly::ggplotly(z22nosb_vs_uninf_volcano[["plot"]])
+```
+
+Add some pvalue barplots from gProfiler for this contrast.
+
+```{r}
 all_gp[["z22nosb_vs_uninf_up"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.2 without drug vs. uninfected without drug, up.
 all_gp[["z22nosb_vs_uninf_up"]][["pvalue_plots"]][["MF"]]
@@ -1059,125 +1399,185 @@ all_gp[["z22nosb_vs_uninf_down"]][["pvalue_plots"]][["TF"]]
 
 ### Infected with z2.3 treated vs. Uninfected treated
 
+I do not think this plot is used at this time.
+
 ```{r}
 ## The original plot
-hs_macr_table$plots$z23sb_vs_sb$deseq_vol_plots
+hs_macr_table[["plots"]][["z23sb_vs_sb"]][["deseq_vol_plots"]]
 
 z23sb_vs_uninfsb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z23sb_vs_sb"]], "z23sb_vs_sb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["infsbz23"]], color_low = plot_colors[["uninfsbnone"]])
-z23sb_vs_uninfsb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
-plotly::ggplotly(z23sb_vs_uninfsb_volcano$plot)
+  label = 10, label_column = "hgncsymbol",
+  color_low = plot_colors[["infsbz23"]], color_high = plot_colors[["uninfsbnone"]])
+z23sb_vs_uninfsb_volcano[["plot"]]
 
-z23sb_vs_uninfsb_volcano <- plot_volcano_condition_de(
-  hs_macr_table[["data"]][["z23sb_vs_sb"]], "z23sb_vs_sb",
-  fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = NULL, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["infsbz23"]], color_low = plot_colors[["uninfsbnone"]])
-z23sb_vs_uninfsb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+plotly::ggplotly(z23sb_vs_uninfsb_volcano[["plot"]])
 ```
 
 ### Infected with z2.3 untreated vs. z2.2 untreated
 
+This is figure 2C at this time.
+
 ```{r}
 ## The original plot
-hs_macr_table$plots$z23nosb_vs_z22nosb$deseq_vol_plots
+hs_macr_table[["plots"]][["z23nosb_vs_z22nosb"]][["deseq_vol_plots"]]
 
 z23nosb_vs_z22nosb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z23nosb_vs_z22nosb"]], "z23nosb_vs_z22nosb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = TRUE,
-  color_high = plot_colors[["infz23"]], color_low = plot_colors[["infz22"]])
-z23nosb_vs_z22nosb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+  label = 10, label_column = "hgncsymbol",
+  color_low = plot_colors[["infz23"]], color_high = plot_colors[["infz22"]])
+
+labeled <- z23nosb_vs_z22nosb_volcano[["plot"]] +
+  scale_x_continuous(breaks = c(-10, -8, -6, -4, -2, 0, 2, 4, 6))
+
+pp(file = "figures/fig2c_labeled.svg")
+labeled
+dev.off()
+labeled
 ```
 
 ### Infected with z2.3 treated vs. z2.2 treated
 
+This is currently figure 3C.
+
+FIXME: The axis label isn't quite right for the ggbreak.
+
 ```{r}
 ## The original plot
-hs_macr_table$plots$z23sb_vs_z22sb$deseq_vol_plots
+hs_macr_table[["plots"]][["z23sb_vs_z22sb"]][["deseq_vol_plots"]]
 
 z23sb_vs_z22sb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z23sb_vs_z22sb"]], "z23sb_vs_z22sb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = FALSE,
+  label = 10, label_column = "hgncsymbol",
   color_high = plot_colors[["infsbz23"]], color_low = plot_colors[["infsbz22"]])
-z23sb_vs_z22sb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+
+labeled <- z23sb_vs_z22sb_volcano[["plot"]] +
+  scale_x_continuous(breaks = c(-23, -6, -4, -2, 0, 2, 4, 6)) +
+  ggbreak::scale_x_break(c(-5, -22.5), scales = 10, space = 0.02)
+pp(file = "figures/fig3c_labeled_breaks.svg")
+labeled
+dev.off()
+labeled
 ```
 
 ### Infected with z2.3 SB treated vs. z2.3 untreated
 
+I think this is currently figure 3A.
+
+FIXME: The axis label for the ggbreak isn't quite right.
+
 ```{r}
 ## The original plot
-hs_macr_table$plots$z23sb_vs_z23nosb$deseq_vol_plots
+hs_macr_table[["plots"]][["z23sb_vs_z23nosb"]][["deseq_vol_plots"]]
 
 z23sb_vs_z23nosb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z23sb_vs_z23nosb"]], "z23sb_vs_z23nosb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = TRUE,
-  color_low = plot_colors[["infsbz23"]], color_high = plot_colors[["infz23"]])
-z23sb_vs_z23nosb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+  label = 10, label_column = "hgncsymbol",
+  color_high = plot_colors[["infsbz23"]], color_low = plot_colors[["infz23"]])
+
+labeled <- z23sb_vs_z23nosb_volcano[["plot"]] +
+  scale_x_continuous(limits = c(-19, 6),
+                     breaks = c(-20, -18, -16, -14, -12, -10, -6, -4, -2, 0, 2, 4, 6)) +
+  ggbreak::scale_x_break(c(-17, -8), scales = 17, space = 0.02)
+pp(file = "figures/fig3a_labeled_with_break.svg")
+labeled
+dev.off()
+labeled
 ```
 
 ### Infected with z2.3 SB treated vs. z2.3 untreated
 
 ```{r}
 ## The original plot
-hs_macr_table$plots$z22sb_vs_z22nosb$deseq_vol_plots
+hs_macr_table[["plots"]][["z22sb_vs_z22nosb"]][["deseq_vol_plots"]]
 
 z22sb_vs_z22nosb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z22sb_vs_z22nosb"]], "z22sb_vs_z22nosb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
-  label = 10, label_column = "hgncsymbol", invert = TRUE,
-  color_low = plot_colors[["infsbz22"]], color_high = plot_colors[["infz22"]])
-z22sb_vs_z22nosb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+  label = 10, label_column = "hgncsymbol",
+  color_high = plot_colors[["infsbz22"]], color_low = plot_colors[["infz22"]])
+
+labeled <- z22sb_vs_z22nosb_volcano[["plot"]] +
+  scale_x_continuous(breaks = c(-6, -4, -2, 0, 2, 4, 6))
+
+pp(file = "figures/fig3b_labeled.svg")
+labeled
+dev.off()
+labeled
 ```
 
 ### Infected with z2.3 SB treated vs. uninfected treated
 
 ```{r}
+x_limits <- c(-6, 6)
 ## The original plot
-hs_macr_table$plots$z23sb_vs_sb$deseq_vol_plots
+hs_macr_table[["plots"]][["z23sb_vs_sb"]][["deseq_vol_plots"]]
 
 z23sb_vs_sb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z23sb_vs_sb"]], "z23sb_vs_sb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   label = 10, label_column = "hgncsymbol", invert = TRUE,
   color_low = plot_colors[["infsbz23"]], color_high = plot_colors[["uninfsbnone"]])
-z23sb_vs_sb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+z23sb_vs_sb_volcano[["plot"]]
 ```
 
 ### Infected with z2.2 SB treated vs. uninfected treated
 
 ```{r}
 ## The original plot
-hs_macr_table$plots$z22sb_vs_sb$deseq_vol_plots
+hs_macr_table[["plots"]][["z22sb_vs_sb"]][["deseq_vol_plots"]]
 
 z22sb_vs_sb_volcano <- plot_volcano_condition_de(
   hs_macr_table[["data"]][["z22sb_vs_sb"]], "z22sb_vs_sb",
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   label = 10, label_column = "hgncsymbol", invert = TRUE,
   color_low = plot_colors[["infsbz22"]], color_high = plot_colors[["uninfsbnone"]])
-z22sb_vs_sb_volcano$plot +
-  scale_x_continuous(limits = x_limits)
+z22sb_vs_sb_volcano[["plot"]]
 ```
 
-Check that my perception of the number of significant up/down genes
-matches what the table/venn says.
+### Uninfected+SbV vs. Uninfected-SbV
+
+This is currently figure 3D.
+
+FIXME: This needs the BOLA2B ggbreak.
 
 ```{r}
-shared <- Vennerable::Venn(list("drug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_uninf"]]),
-                                "nodrug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23nosb_vs_uninf"]])))
-pp(file="images/z23_vs_uninf_venn_up.png")
+## The original plot
+hs_macr_table[["plots"]][["sb_vs_uninf"]][["deseq_vol_plots"]]
+
+sb_vs_uninf_volcano <- plot_volcano_condition_de(
+  hs_macr_table[["data"]][["sb_vs_uninf"]], "sb_vs_uninf",
+  fc_col = "deseq_logfc", p_col = "deseq_adjp",
+  label = 10, label_column = "hgncsymbol",
+  color_high = plot_colors[["uninfsbnone"]], color_low = plot_colors[["uninfnone"]])
+
+labeled <- sb_vs_uninf_volcano[["plot"]] +
+  scale_x_continuous(breaks = c(-23, -6, -4, -2, 0, 2, 4, 6)) +
+  ggbreak::scale_x_break(c(-5, -22.5), scales = 10, space = 0.02)
+pp(file = "figures/fig3d_labeled_breaks.svg")
+labeled
+dev.off()
+labeled
+```
+
+## Double-check that gene counts match my perceptions
+
+Check that my perception of the number of significant up/down genes
+matches what the table/venn says.  In the following block I am
+performing some venn/upset analyses to see if the numbers of genes
+match what we have in the current version of the manuscript (plus or
+minus a gene) and thus if my interpretation of the figure/legend text
+matches what I think it means.
+
+```{r}
+shared <- Vennerable::Venn(list(
+  "drug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_uninf"]]),
+  "nodrug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23nosb_vs_uninf"]])))
+pp(file = "images/z23_vs_uninf_venn_up.png")
 Vennerable::plot(shared)
 dev.off()
 Vennerable::plot(shared)
@@ -1185,9 +1585,10 @@ Vennerable::plot(shared)
 length(shared@IntersectionSets[["10"]]) + length(shared@IntersectionSets[["11"]])
 dim(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_uninf"]])
 
-shared <- Vennerable::Venn(list("drug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z22sb_vs_uninf"]]),
-                                "nodrug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z22nosb_vs_uninf"]])))
-pp(file="images/z22_vs_uninf_venn_up.png")
+shared <- Vennerable::Venn(list(
+  "drug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z22sb_vs_uninf"]]),
+  "nodrug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z22nosb_vs_uninf"]])))
+pp(file = "images/z22_vs_uninf_venn_up.png")
 Vennerable::plot(shared)
 dev.off()
 Vennerable::plot(shared)
@@ -1227,26 +1628,31 @@ An orthogonal comparison to that performed above is to directly
 compare the zymodeme 2.3 and 2.2 samples with and without antimonial
 treatment.
 
+### Z2.3 / z2.2 without drug
+
 ```{r}
 z23nosb_vs_z22nosb_volcano <- plot_volcano_de(
   table = hs_macr_table[["data"]][["z23nosb_vs_z22nosb"]],
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   shapes_by_state = FALSE, color_by = "fc",  label = 10, label_column = "hgncsymbol")
-plotly::ggplotly(z23nosb_vs_z22nosb_volcano$plot)
+plotly::ggplotly(z23nosb_vs_z22nosb_volcano[["plot"]])
 
 z23sb_vs_z22sb_volcano <- plot_volcano_de(
   table = hs_macr_table[["data"]][["z23sb_vs_z22sb"]],
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   shapes_by_state = FALSE, color_by = "fc",  label = 10, label_column = "hgncsymbol")
-plotly::ggplotly(z23sb_vs_z22sb_volcano$plot)
+plotly::ggplotly(z23sb_vs_z22sb_volcano[["plot"]])
 ```
 
 ```{r}
-z23nosb_vs_z22nosb_volcano$plot +
+z23nosb_vs_z22nosb_volcano[["plot"]] +
   xlim(-10, 10) +
   ylim(0, 60)
 
-pp(file="images/z23nosb_vs_z22nosb_reactome_up.png", image=all_gp[["z23nosb_vs_z22nosb_up"]][["pvalue_plots"]][["REAC"]], height=12, width=9)
+pp(file = "images/z23nosb_vs_z22nosb_reactome_up.png",
+   image = all_gp[["z23nosb_vs_z22nosb_up"]][["pvalue_plots"]][["REAC"]],
+   height = 12, width = 9)
+all_gp[["z23nosb_vs_z22nosb_up"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.3 without drug vs. uninfected without drug, up.
 all_gp[["z23nosb_vs_z22nosb_up"]][["pvalue_plots"]][["KEGG"]]
 ## KEGG, zymodeme2.3 without drug vs. uninfected without drug, up.
@@ -1266,12 +1672,18 @@ all_gp[["z23nosb_vs_z22nosb_down"]][["pvalue_plots"]][["TF"]]
 ## TF, zymodeme2.3 without drug vs. uninfected without drug, down.
 ```
 
+### z2.3 / z2.2 with drug
+
 ```{r}
-z23sb_vs_z22sb_volcano$plot +
+z23sb_vs_z22sb_volcano[["plot"]] +
   xlim(-10, 10) +
   ylim(0, 60)
 
-pp(file="images/z23sb_vs_z22sb_reactome_up.png", image=all_gp[["z23sb_vs_z22sb_up"]][["pvalue_plots"]][["REAC"]], height=12, width=9)
+pp(
+  file = "images/z23sb_vs_z22sb_reactome_up.png",
+  image = all_gp[["z23sb_vs_z22sb_up"]][["pvalue_plots"]][["REAC"]],
+  height = 12, width = 9)
+all_gp[["z23sb_vs_z22sb_up"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.3 without drug vs. uninfected without drug, up.
 all_gp[["z23sb_vs_z22sb_up"]][["pvalue_plots"]][["KEGG"]]
 ## KEGG, zymodeme2.3 without drug vs. uninfected without drug, up.
@@ -1291,20 +1703,27 @@ all_gp[["z23sb_vs_z22sb_down"]][["pvalue_plots"]][["TF"]]
 ## TF, zymodeme2.3 without drug vs. uninfected without drug, down.
 ```
 
+### Venn to see shared/unique genes
+
+Once again I wish to pull out the significant genes and see how my
+numbers match against the text.
 
 ```{r}
-shared <- Vennerable::Venn(list("drug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_z22sb"]]),
-                                "nodrug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23nosb_vs_z22nosb"]])))
-pp(file="images/drug_nodrug_venn_up.png")
+shared <- Vennerable::Venn(list(
+  "drug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_z22sb"]]),
+  "nodrug" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23nosb_vs_z22nosb"]])))
+pp(file = "images/drug_nodrug_venn_up.png")
 Vennerable::plot(shared)
 dev.off()
 Vennerable::plot(shared)
 
-shared <- Vennerable::Venn(list("drug" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z23sb_vs_z22sb"]]),
-                                "nodrug" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z23nosb_vs_z22nosb"]])))
-pp(file="images/drug_nodrug_venn_down.png")
+shared <- Vennerable::Venn(
+  list("drug" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z23sb_vs_z22sb"]]),
+       "nodrug" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z23nosb_vs_z22nosb"]])))
+pp(file = "images/drug_nodrug_venn_down.png")
 Vennerable::plot(shared)
 dev.off()
+Vennerable::plot(shared)
 ```
 
 A slightly different way of looking at the differences between the two
@@ -1326,26 +1745,30 @@ Another likely question is to directly compare the treated vs
 untreated samples for each zymodeme infection in order to visualize
 the effects of antimonial.
 
+### z2.3 with and without drug
+
 ```{r}
 z23sb_vs_z23nosb_volcano <- plot_volcano_de(
   table = hs_macr_table[["data"]][["z23sb_vs_z23nosb"]],
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   shapes_by_state = FALSE, color_by = "fc",  label = 10, label_column = "hgncsymbol")
-plotly::ggplotly(z23sb_vs_z23nosb_volcano$plot)
+plotly::ggplotly(z23sb_vs_z23nosb_volcano[["plot"]])
 z22sb_vs_z22nosb_volcano <- plot_volcano_de(
   table = hs_macr_table[["data"]][["z22sb_vs_z22nosb"]],
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   shapes_by_state = FALSE, color_by = "fc",  label = 10, label_column = "hgncsymbol")
-plotly::ggplotly(z22sb_vs_z22nosb_volcano$plot)
+plotly::ggplotly(z22sb_vs_z22nosb_volcano[["plot"]])
 ```
 
 ```{r}
-z23sb_vs_z23nosb_volcano$plot +
+z23sb_vs_z23nosb_volcano[["plot"]] +
   xlim(-8, 8) +
   ylim(0, 210)
 
-pp(file="images/z23sb_vs_z23nosb_reactome_up.png",
-   image=all_gp[["z23sb_vs_z23nosb_up"]][["pvalue_plots"]][["REAC"]], height=12, width=9)
+pp(file = "images/z23sb_vs_z23nosb_reactome_up.png",
+   image = all_gp[["z23sb_vs_z23nosb_up"]][["pvalue_plots"]][["REAC"]],
+   height = 12, width = 9)
+all_gp[["z23sb_vs_z23nosb_up"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.3 without drug vs. uninfected without drug, up.
 all_gp[["z23sb_vs_z23nosb_up"]][["pvalue_plots"]][["KEGG"]]
 ## KEGG, zymodeme2.3 without drug vs. uninfected without drug, up.
@@ -1365,13 +1788,17 @@ all_gp[["z23sb_vs_z23nosb_down"]][["pvalue_plots"]][["TF"]]
 ## TF, zymodeme2.3 without drug vs. uninfected without drug, down.
 ```
 
+### z2.2 with and without drug
+
 ```{r}
-z22sb_vs_z22nosb_volcano$plot +
+z22sb_vs_z22nosb_volcano[["plot"]] +
   xlim(-8, 8) +
   ylim(0, 210)
 
-pp(file="images/z22sb_vs_z22nosb_reactome_up.png",
-   image=all_gp[["z22sb_vs_z22nosb_up"]][["pvalue_plots"]][["REAC"]], height=12, width=9)
+pp(file = "images/z22sb_vs_z22nosb_reactome_up.png",
+   image = all_gp[["z22sb_vs_z22nosb_up"]][["pvalue_plots"]][["REAC"]],
+   height = 12, width = 9)
+all_gp[["z22sb_vs_z22nosb_up"]][["pvalue_plots"]][["REAC"]]
 ## Reactome, zymodeme2.3 without drug vs. uninfected without drug, up.
 all_gp[["z22sb_vs_z22nosb_up"]][["pvalue_plots"]][["KEGG"]]
 ## KEGG, zymodeme2.3 without drug vs. uninfected without drug, up.
@@ -1391,17 +1818,21 @@ all_gp[["z22sb_vs_z22nosb_down"]][["pvalue_plots"]][["TF"]]
 ## TF, zymodeme2.3 without drug vs. uninfected without drug, down.
 ```
 
+### Shared and unique genes after/before drug
+
 ```{r}
-shared <- Vennerable::Venn(list("z23" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_z23nosb"]]),
-                                "z22" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z22sb_vs_z22nosb"]])))
-pp(file="images/z23_z22_drug_venn_up.png")
+shared <- Vennerable::Venn(list(
+  "z23" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z23sb_vs_z23nosb"]]),
+  "z22" = rownames(hs_macr_sig[["deseq"]][["ups"]][["z22sb_vs_z22nosb"]])))
+pp(file = "images/z23_z22_drug_venn_up.png")
 Vennerable::plot(shared)
 dev.off()
 Vennerable::plot(shared)
 
-shared <- Vennerable::Venn(list("z23" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z23sb_vs_z23nosb"]]),
-                                "z22" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z22sb_vs_z22nosb"]])))
-pp(file="images/z23_z22_drug_venn_down.png")
+shared <- Vennerable::Venn(list(
+  "z23" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z23sb_vs_z23nosb"]]),
+  "z22" = rownames(hs_macr_sig[["deseq"]][["downs"]][["z22sb_vs_z22nosb"]])))
+pp(file = "images/z23_z22_drug_venn_down.png")
 Vennerable::plot(shared)
 dev.off()
 Vennerable::plot(shared)
@@ -1417,34 +1848,49 @@ The previous plotted contrasts sought to show changes between the two
 strains z2.3 and z2.2.  Conversely, the previous volcano plots seek to
 directly compare each strain before/after drug treatment.
 
-## LRT of the Human Macrophage
+# LRT of the Human Macrophage
+
+A slightly different tack to examine the data is to perform a
+likelihood ratio test in order to look for trends which are shared
+among genes when examining different conditions in the data.
 
 ```{r}
 tmrc2_lrt_strain_drug <- deseq_lrt(hs_macr, interactor_column = "drug",
-                                   interest_column = "macrophagezymodeme", factors = c("drug", "macrophagezymodeme"))
-tmrc2_lrt_strain_drug$cluster_data$plot
+                                   interest_column = "macrophagezymodeme",
+                                   factors = c("drug", "macrophagezymodeme"))
+tmrc2_lrt_strain_drug[["cluster_data"]][["plot"]]
 ```
 
-## Parasite
+# Parasite
+
+Let us consider for a moment differences among the parasite
+transcriptomes for the samples which were not drug treated.
+
+One thing I did in the initial implementation of this document was to
+repeat the variable 'up_genes' for each comparison; I think this time
+I will make a different variable for each comparison so I can play
+with them a little further.
 
 ```{r}
+comparison <- "z23_vs_z22"
 lp_macrophage_de <- all_pairwise(lp_macrophage_nosb,
-                                 model_batch="svaseq", filter=TRUE)
+                                 model_batch = "svaseq", filter = TRUE)
 tmrc2_parasite_keepers <- list(
   "z23_vs_z22" = c("z23", "z22"))
 lp_macrophage_table <- combine_de_tables(
   lp_macrophage_de, keepers = tmrc2_parasite_keepers,
-  excel = glue("excel/macrophage_de/macrophage_parasite_infection_de-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/de_tables/parasite_infection_de-v{ver}.xlsx"))
 lp_macrophage_sig <- extract_significant_genes(
   lp_macrophage_table,
-  excel = glue("excel/macrophage_de/macrophage_parasite_sig-v{ver}.xlsx"))
+  excel = glue("analyses/macrophage_de/sig_tables/parasite_sig-v{ver}.xlsx"))
 
-lp_macrophage_table[["plots"]][["z23nosb_vs_z22nosb"]][["deseq_vol_plots"]][["plot"]]
+lp_macrophage_table[["plots"]][[comparison]][["deseq_vol_plots"]]
+lp_macrophage_table[["plots"]][[comparison]][["deseq_ma_plots"]]
 
-up_genes <- lp_macrophage_sig[["deseq"]][["ups"]][[1]]
-dim(up_genes)
-down_genes <- lp_macrophage_sig[["deseq"]][["downs"]][[1]]
-dim(down_genes)
+up_genes_z23z22 <- lp_macrophage_sig[["deseq"]][["ups"]][[comparison]]
+dim(up_genes_z23z22)
+down_genes_z23z22 <- lp_macrophage_sig[["deseq"]][["downs"]][[comparison]]
+dim(down_genes_z23z22)
 ```
 
 ```{r parasite_volcano}
@@ -1452,41 +1898,83 @@ lp_z23sb_vs_z22sb_volcano <- plot_volcano_de(
   table = lp_macrophage_table[["data"]][["z23_vs_z22"]],
   fc_col = "deseq_logfc", p_col = "deseq_adjp",
   shapes_by_state = FALSE, color_by = "fc",  label = 10, label_column = "hgncsymbol")
-plotly::ggplotly(lp_z23sb_vs_z22sb_volcano$plot)
-lp_z23sb_vs_z22sb_volcano$plot
+plotly::ggplotly(lp_z23sb_vs_z22sb_volcano[["plot"]])
+lp_z23sb_vs_z22sb_volcano[["plot"]]
 ```
+
+## Ontology search
+
+An important note, I recently added a minimum crossreference argument
+(defaulting to 40 genes), which causes lots of comparisons to fail for
+poorly annotated genomes (like panamensis.)  Thus, I am relaxing that
+constraint for these searches.
 
 ```{r}
 lp_lengths <- all_lp_annot[, c("gid", "annot_cds_length")]
 colnames(lp_lengths)  <- c("ID", "length")
 
-up_goseq <- simple_goseq(up_genes, go_db = lp_go, length_db = lp_lengths)
+up_goseq <- simple_goseq(up_genes_z23z22, go_db = lp_go,
+                         length_db = lp_lengths, min_xref = 15)
 ## View categories over represented in the 2.3 samples
-up_goseq$pvalue_plots$bpp_plot_over
-down_goseq <- simple_goseq(down_genes, go_db = lp_go, length_db = lp_lengths)
+up_goseq[["pvalue_plots"]][["bpp_plot_over"]]
+down_goseq <- simple_goseq(down_genes_z23z22, go_db = lp_go,
+                           length_db = lp_lengths, min_xref = 15)
 ## View categories over represented in the 2.2 samples
-down_goseq$pvalue_plots$bpp_plot_over
+down_goseq[["pvalue_plots"]][["bpp_plot_over"]]
 
-written_goseq <- write_goseq_data(up_goseq,
-                                  excel = glue("lp_macrophage_increased_z2.3_goseq-v{ver}.xlsx"))
-written_goseq <- write_goseq_data(down_goseq,
-                                  excel = glue("lp_macrophage_increased_z2.2_goseq-v{ver}.xlsx"))
+created <- dir.create(glue("analyses/macrophage_de/goseq_parasite"))
+written_goseq <- write_goseq_data(
+  up_goseq,
+  excel = glue("analyses/macrophage_de/goseq_parasite/lp_macrophage_increased_z2.3_goseq-v{ver}.xlsx"))
+written_goseq <- write_goseq_data(
+  down_goseq,
+  excel = glue("analyses/macrophage_de/goseq_parasite/lp_macrophage_increased_z2.2_goseq-v{ver}.xlsx"))
 ```
 
 # GSVA
 
-```{r}
-hs_infected <- subset_expt(hs_macrophage, subset="macrophagetreatment!='uninf'") %>%
-  subset_expt(subset="macrophagetreatment!='uninf_sb'")
+Note: The following block assumes one is able to download a fresh copy
+of msigDB, which I am not sure is possible within the constraints of a
+container (I mean it is trivial to do, but I am not sure if it is ok
+due to licensing).  However, Broad provides a data package of a msigdb
+release.  As a result, the following block will be repeated using that.
+
+```{r, eval=FALSE}
+hs_infected <- subset_expt(hs_macrophage, subset = "macrophagetreatment!='uninf'") %>%
+  subset_expt(subset = "macrophagetreatment!='uninf_sb'")
 hs_gsva_c2 <- simple_gsva(hs_infected)
-hs_gsva_c2_meta <- get_msigdb_metadata(hs_gsva_c2, msig_xml="reference/msigdb_v7.2.xml")
-hs_gsva_c2_sig <- get_sig_gsva_categories(hs_gsva_c2_meta, excel = "excel/macrophage_de/hs_macrophage_gsva_c2_sig.xlsx")
-hs_gsva_c2_sig$raw_plot
+hs_gsva_c2_meta <- get_msigdb_metadata(hs_gsva_c2, msig_xml = "reference/msigdb_v7.2.xml")
+hs_gsva_c2_sig <- get_sig_gsva_categories(
+  hs_gsva_c2_meta,
+  excel = glue("analyses/macrophage_de/gsva/hs_macrophage_gsva_c2_sig.xlsx"))
+hs_gsva_c2_sig[["raw_plot"]]
 
 hs_gsva_c7 <- simple_gsva(hs_infected, signature_category = "c7")
-hs_gsva_c7_meta <- get_msigdb_metadata(hs_gsva_c7, msig_xml="reference/msigdb_v7.2.xml")
-hs_gsva_c7_sig <- get_sig_gsva_categories(hs_gsva_c7, excel = "excel/macrophage_de/hs_macrophage_gsva_c7_sig.xlsx")
-hs_gsva_c7_sig$raw_plot
+hs_gsva_c7_meta <- get_msigdb_metadata(hs_gsva_c7, msig_xml = "reference/msigdb_v7.2.xml")
+hs_gsva_c7_sig <- get_sig_gsva_categories(
+  hs_gsva_c7,
+  excel = glue("analyses/macrophage_de/gsva/hs_macrophage_gsva_c7_sig.xlsx"))
+hs_gsva_c7_sig[["raw_plot"]]
+```
+
+## Repeat using the GSVAdata package.
+
+```{r}
+hs_infected <- subset_expt(hs_macrophage, subset = "macrophagetreatment!='uninf'") %>%
+  subset_expt(subset = "macrophagetreatment!='uninf_sb'")
+hs_gsva_c2 <- simple_gsva(hs_infected)
+##hs_gsva_c2_meta <- get_msigdb_metadata(hs_gsva_c2, msig_xml="reference/msigdb_v7.2.xml")
+hs_gsva_c2_sig <- get_sig_gsva_categories(
+  hs_gsva_c2,
+  excel = glue("analyses/macrophage_de/gsva/hs_macrophage_gsva_c2_sig.xlsx"))
+hs_gsva_c2_sig[["raw_plot"]]
+
+hs_gsva_c7 <- simple_gsva(hs_infected, signature_category = "c7")
+##hs_gsva_c7_meta <- get_msigdb_metadata(hs_gsva_c7, msig_xml="reference/msigdb_v7.2.xml")
+hs_gsva_c7_sig <- get_sig_gsva_categories(
+  hs_gsva_c7,
+  excel = glue("analyses/macrophage_de/gsva/hs_macrophage_gsva_c7_sig.xlsx"))
+hs_gsva_c7_sig[["raw_plot"]]
 ```
 
 # Try out a new tool
@@ -1517,7 +2005,7 @@ wikipathways <- read_gmt(paste0(data_path, "/wikipathways_human_symbol.gmt"),
 expt <- subset_expt(hs_macrophage, subset = "macrophagetreatment!='uninf'") %>%
   subset_expt(subset = "macrophagetreatment!='uninf_sb'")
 expt <- set_expt_conditions(expt, fact = "macrophagezymodeme")
-
+symbol_column <- "hgnc_symbol"
 symbol_vector <- fData(expt)[[symbol_column]]
 names(symbol_vector) <- rownames(fData(expt))
 symbol_df <- as.data.frame(symbol_vector)
@@ -1540,7 +2028,7 @@ tt <- CreateOmics(
   pathwayCollection_ls = wikipathways,
   response = factor_df,
   respType = "categorical",
-  minPathSize=5)
+  minPathSize = 5)
 
 super <- AESPCA_pVals(
   object = tt,
@@ -1552,15 +2040,11 @@ super <- AESPCA_pVals(
 ```
 
 ```{r}
-## Stopping this because it takes forever
-##if (!isTRUE(get0("skip_load"))) {
-##  pander::pander(sessionInfo())
-##  message("This is hpgltools commit: ", get_git_commit())
-##  message("Saving to ", savefile)
-##  tmp <- sm(saveme(filename = savefile))
-##}
+pander::pander(sessionInfo())
+message("This is hpgltools commit: ", get_git_commit())
+tmp <- saveme(filename = savefile)
 ```
 
-```{r loadme_after, eval = FALSE}
+```{r loadme_after, eval=FALSE}
 tmp <- loadme(filename = savefile)
 ```

@@ -1,5 +1,5 @@
 ---
-title: "TMRC2 Macrophages `r Sys.getenv('VERSION')`: Data Set Creation"
+title: "Macrophage response to different strains `r Sys.getenv('VERSION')`: Data Set Creation"
 author: "atb abelew@gmail.com"
 date: "`r Sys.Date()`"
 output:
@@ -32,7 +32,7 @@ code.r{
   font-size: 16px;
 }
 pre {
- font-size: 16px
+  font-size: 16px
 }
 </style>
 
@@ -42,7 +42,7 @@ library(glue)
 library(ggplot2)
 library(Heatplus)
 library(dplyr)
-library(EuPathDB)
+
 knitr::opts_knit$set(
   progress = TRUE, verbose = TRUE, width = 90, echo = TRUE)
 knitr::opts_chunk$set(
@@ -157,7 +157,7 @@ The same database of annotations also provides mappings to the set of
 annotated GO categories for the L.panamensis genome along with gene
 lengths.
 
-```{r}
+```{r, eval=FALSE}
 meta <- download_eupath_metadata(webservice = "tritrypdb", overwrite = FALSE)
 panamensis_entry <- get_eupath_entry("MHOM", metadata = meta[["valid"]])
 panamensis_db <- make_eupath_orgdb(panamensis_entry)
@@ -186,6 +186,29 @@ lp_lengths <- all_lp_annot[, c("gid", "annot_cds_length")]
 colnames(lp_lengths)  <- c("ID", "length")
 all_lp_annot[["annot_gene_product"]] <- tolower(all_lp_annot[["annot_gene_product"]])
 orthos <- sm(extract_eupath_orthologs(db = panamensis_pkg))
+data_structures <- c(data_structures, "lp_lengths", "lp_go", "all_lp_annot")
+```
+
+```{r}
+all_installed <- rownames(installed.packages())
+candidates <- grepl(pattern = "^org.Lpanamensis.MHOM.*v68.eg.db", x = all_installed)
+orgdb_pkg_name <- all_installed[candidates]
+
+tt <- library(orgdb_pkg_name, character.only = TRUE)
+panamensis_pkg <- get0(orgdb_pkg_name)
+all_fields <- columns(panamensis_pkg)
+all_lp_annot <- sm(load_orgdb_annotations(
+    panamensis_pkg,
+    keytype = "gid",
+    fields = c("annot_gene_entrez_id", "annot_gene_name",
+               "annot_strand", "annot_chromosome", "annot_cds_length",
+               "annot_gene_product")))$genes
+
+lp_go <- load_orgdb_go(panamensis_pkg)
+lp_go <- lp_go[, c("GID", "GO")]
+lp_lengths <- all_lp_annot[, c("gid", "annot_cds_length")]
+colnames(lp_lengths)  <- c("ID", "length")
+all_lp_annot[["annot_gene_product"]] <- tolower(all_lp_annot[["annot_gene_product"]])
 data_structures <- c(data_structures, "lp_lengths", "lp_go", "all_lp_annot")
 ```
 
@@ -296,8 +319,13 @@ The metadata for the macrophage samples contains a couple of columns
 for mapped human and parasite reads.  We will therefore use them
 separately to create two expressionsets, one for each species.
 
+** Note **: I forgot to commit the addition of plot_metadata factors() in the last run of this.
+In addition, I need to add an explicit month to
+load_biomart_annotations() _or_ change the function to search a couple
+more months before it stops trying to find an archive.
+
 ```{r}
-hs_annot <- load_biomart_annotations(year = "2020")
+hs_annot <- load_biomart_annotations(year = "2020", month = "04")
 hs_annot <- hs_annot[["annotation"]]
 hs_annot[["transcript"]] <- paste0(rownames(hs_annot), ".", hs_annot[["transcript_version"]])
 rownames(hs_annot) <- make.names(hs_annot[["ensembl_gene_id"]], unique = TRUE)
@@ -320,6 +348,8 @@ fixed_genenames <- gsub(x = rownames(exprs(hs_macrophage)), pattern = "^gene:",
                         replacement = "")
 hs_macrophage <- set_expt_genenames(hs_macrophage, ids = fixed_genenames)
 table(pData(hs_macrophage)$condition)
+## Added to make a simplified PCA plot.
+pData(hs_macrophage)[["experiment"]] <- "macrophage"
 
 ## The following 3 lines were copy/pasted to datastructures and should be removed soon.
 nostrain <- is.na(pData(hs_macrophage)[["strainid"]])
@@ -334,6 +364,27 @@ pData(hs_macrophage)[["infectedp"]] <- "infected"
 pData(hs_macrophage)[uninfected, "infectedp"] <- "uninfected"
 
 data_structures <- c(data_structures, "hs_macrophage")
+```
+
+## Double-check sample IDs against the sample sheet
+
+1 sample has been excluded from the analysis but is in the sample
+sheet.  I am reasonably certain I know which, but will double-check
+here.
+
+```{r, eval=FALSE}
+sample_sheet_ids = c("TMRC30051","TMRC30057","TMRC30059","TMRC30060","TMRC30061","TMRC30062",
+                     "TMRC30063","TMRC30064","TMRC30065","TMRC30066","TMRC30067","TMRC30069",
+                     "TMRC30117","TMRC30162","TMRC30243","TMRC30244","TMRC30245","TMRC30246",
+                     "TMRC30247","TMRC30248","TMRC30249","TMRC30250","TMRC30251","TMRC30252",
+                     "TMRC30266","TMRC30267","TMRC30268","TMRC30286","TMRC30326","TMRC30316",
+                     "TMRC30317","TMRC30322","TMRC30323","TMRC30328","TMRC30318","TMRC30319",
+                     "TMRC30324","TMRC30325","TMRC30320","TMRC30321","TMRC30327","TMRC30312",
+                     "TMRC30297","TMRC30298","TMRC30299","TMRC30300","TMRC30295","TMRC30296",
+                     "TMRC30303","TMRC30304","TMRC30301","TMRC30302","TMRC30314","TMRC30315",
+                     "TMRC30313")
+found <- sample_sheet_ids %in% colnames(exprs(hs_macr))
+colnames(exprs(hs_macr))[!found]
 ```
 
 ## Subset and create different groupings
@@ -385,7 +436,6 @@ ggstats_parasite
 dev.off()
 ggstats_parasite
 
-
 hs_macr_drug_expt <- set_expt_conditions(hs_macr, fact = "drug")
 
 hs_macr_strain_expt <- set_expt_conditions(hs_macr, fact = "macrophagezymodeme") %>%
@@ -412,6 +462,7 @@ macr_sankey <- plot_meta_sankey(hs_macrophage, color_choices = color_choices,
                                 factors = c("oldnew", "drug", "infectedp", "macrophagezymodeme"))
 macr_sankey
 ```
+
 Finally, split off the U937 samples.
 
 ```{r}
@@ -442,6 +493,7 @@ lp_macrophage_filt <- subset_expt(lp_macrophage, nonzero = 2500) %>%
   semantic_expt_filter(semantic = c("amastin", "gp63", "leishmanolysin"),
                        semantic_column = "annot_gene_product")
 data_structures <- c(data_structures, "lp_macrophage", "lp_macrophage_filt")
+
 filt_written <- write_expt(lp_macrophage_filt,
   excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_reads_filtered-v{ver}.xlsx"))
 lp_macrophage <- lp_macrophage_filt
@@ -459,6 +511,12 @@ test <- sm(gather_preprocessing_metadata(sample_sheet, specification = spec))
 # Save all data structures into one rda
 
 ```{r save_all_data}
+found_idx <- data_structures %in% ls()
+if (sum(!found_idx) > 0) {
+  not_found <- data_structures[!found_idx]
+  warning("Some datastructures were not generated: ", toString(not_found), ".")
+  data_structures <- data_structures[found_idx]
+}
 save(list = data_structures, file = glue("rda/tmrc2_data_structures-v{ver}.rda"))
 ```
 
@@ -469,6 +527,6 @@ message("Saving to ", savefile)
 # tmp <- sm(saveme(filename = savefile))
 ```
 
-```{r loadme_after, eval = FALSE}
+```{r loadme_after, eval=FALSE}
 tmp <- loadme(filename = savefile)
 ```

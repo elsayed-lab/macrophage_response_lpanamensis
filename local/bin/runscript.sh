@@ -1,34 +1,57 @@
 #!/usr/bin/env bash
+#set -o errexit
 set -o errtrace
 set -o pipefail
 start=$(pwd)
-## Note that VERSION here is not the same as the version used to build the container.
-export RENDER_VERSION=$(date +%Y%m)
+source /usr/local/etc/bashrc
+export VERSION=$(date +%Y%m)
 
 
 function usage() {
     echo "This script by default will render every file in the list:"
     echo "${inputs}"
     echo "into the directory:"
-    echo "${output_dir}"
+    echo "${OUTPUT_DIR}"
     echo ""
     echo "It also understands the options: "
     echo "-i: colon-separated list of input files."
     echo "-o: Output directory to write data/outputs."
     echo "-c: Clean up the output directory."
+    echo "-a: Copy the hpgltools repository to the current working directory."
+    echo "-d: Dump the _entire_ data directory from the container to your working directory."
 }
+
 
 function cleanup() {
     echo "Cleaning the output directory to rerun."
-    cd "${output_dir}" || exit
+    cd "${OUTPUT_DIR}" || exit
     rm -f ./*.finished*
 }
 
+
+function copy_hpgltools() {
+    echo "Copying the hpgltools repository to the current working directory."
+    mkdir -p hpgltools
+    rsync -av /data/hpgltools/ hpgltools/
+}
+
+
+function dump() {
+    echo "Copying the entire data tree from the container to the current working directory."
+    echo "This includes all the R packages, any built genomes, all the raw data, _everything_."
+    echo "You have 5 seconds to hit control-C before it starts."
+    sleep 5
+    rsync -av /data/ --exclude='R' --exclude='renv.lock' --exclude='renv/' --exclude='hpgltools/' --exclude='hpgldata/' .
+}
+
+
 function render_inputs() {
-    echo "Version: ${RENDER_VERSION}"
+    echo "This is using versions: container: ${CONTAINER_VERSION}, bioconductor: ${BIOC_VERSION},"
+    echo "hpgltools: ${HPGL_VERSION}, and script: ${VERSION}."
     echo "This script should render the Rmd files in the list:"
     echo "${inputs}."
-    mkdir -p excel figures
+    mkdir -p excel figures tmp cpm rpkm
+    export TMPDIR="$(pwd)/tmp"
     for input in $(echo "${inputs}" | perl -pe "tr/:/ /"); do
         base=$(basename "$input" .Rmd)
         finished="${base}.finished"
@@ -36,7 +59,7 @@ function render_inputs() {
             echo "The file: ${finished} already exists, skipping this input."
         else
             echo "Rendering: ${input}"
-            Rscript -e "hpgltools::renderme('${input}', 'html_document')" | tee -a "${base}.log"
+            Rscript -e "hpgltools::renderme('${input}', 'html_document')" 2>"${base}.stderr" | tee -a "${base}.stdout"
             if [[ "$?" -ne 0 ]]; then
                 echo "The Rscript failed."
             else
@@ -60,12 +83,16 @@ done
 number=0; rest=false; ws=false
 # Parse short options
 OPTIND=1
-while getopts "ch:i:" opt; do
+while getopts "abdch:i:" opt; do
     case "$opt" in
         'c') cleanup
            exit 0;;
         'h') usage
-           exit 0;;
+             exit 0;;
+        'a') copy_hpgltools
+                exit 0;;
+        'd') dump
+             exit 0;;
         'i') inputs=$OPTARG
              render_inputs
              exit 0;;
@@ -78,13 +105,15 @@ shift $(expr $OPTIND - 1) # remove options from positional parameters
 ## If -i is not provided, then we are not working from within the container
 ## and so will not create a directory from within the /output bind mount.
 
-output_dir="$(date +%Y%m%d%H%M)_outputs"
-mkdir -p "${output_dir}"
-cd "${output_dir}" || exit
+export OUTPUT_DIR="$(date +%Y%m%d%H%M)_outputs"
+mkdir -p "${OUTPUT_DIR}"
+cd "${OUTPUT_DIR}" || exit
 ## DEFAULT_INPUT is provided in the yml file.
 inputs="${DEFAULT_INPUT}"
 echo "No colon-separated input file(s) given, analyzing the archived data."
-rsync -a /data/ .
+echo "About to rsync the data tree with: "
+echo "  rsync -av /data/ --exclude='R' --exclude='renv/' --exclude='hpgltools/' --exclude='hpgldata/' ."
+rsync -av /data/ --exclude='R' --exclude='renv.lock' --exclude='renv/' --exclude='hpgltools/' --exclude='*.tar' .
 for i in $(/bin/ls /data/preprocessing/*.tar); do
     untarred=$(cd preprocessing && tar xaf "${i}")
 done
@@ -94,5 +123,7 @@ if [[ -n "${untarred}" ]]; then
 fi
 render_inputs
 cd "${start}" || exit
-rm current_output
-ln -s "${output_dir}" current_output
+rm -f current_output
+/usr/bin/ln -s "${OUTPUT_DIR}" current_output
+minutes=$(( ${SECONDS} / 60 ))
+echo "This set of analyses completed in ${minutes} minutes."
