@@ -1,0 +1,46 @@
+
+* 20221206 meeting
+
+I am thinking that this meeting will bring Maria Adelaida fully back
+into the analyses of the parasite data, and therefore may focus
+primarily on the goals rather than the analyses?
+
++ Maria Adelaida meeting with Olgla/Mariana: integrating
+  transcriptomics/genomics question.
++ Paper on relationship btwn primary metadata factors via transcriptome/genome.
++ Second on drug susceptibility without those factors (I think this
+  means the macrophages)
++ Definition of species?  MAG: Define consensus sequences for various
+  strains/species.  We effectively have this on hand, though the
+  quality may be a little less good for 2.3.
++ Resulting goal: Create a tree of the strains (I am just going to
+  call zymodemes strains from now on).
+++ What organisms would we include in a tree to describe these
+    relationships: guyanensis, braziliensis 2904, 2.2, 2.3, 2.1, 2.4,
+    panamensis reference, peruviania(sp? I have not seen this genome),
+    panama, 2903; actually this may be tricky because we have always
+    done this with a specific reference strain (panamensis col) which is
+    one of the strains in the comparison.  hmm...
+++ Check the most variant strains for identity (Luc)
+++  Methods for creating tree, traditional phylogeny vs. variant
+    hclust?
++ PCR queries, works well if one performs sanger sequencing.
+
+
+* 202408
+
+Question about reactome z2.3/uninfected down: 253 genes
+observed but no reactome result observed?
+
+Showing plots of counts with respect to drug treatment: query to Najib
+to clarify normalization. I think I can make versions of these plots
+which use SL/normalized counts to alleviate Najib's query.
+
+mean ratio of SL/total by condition?
+
+* 202509
+
+1. Make sure the data for the box and whiskers are available -- do
+   this in a way which includes only the genes of interest --
+   including the transporters etc.
+2. Double-check the 2.3/2.2 down reactome/wikipath tables.

@@ -23,16 +23,16 @@ output:
 
 <style type="text/css">
 body .main-container {
-  max-width: 1600px;
+max-width: 1600px;
 }
 body, td {
-  font-size: 16px;
+font-size: 16px;
 }
 code.r{
-  font-size: 16px;
+font-size: 16px;
 }
 pre {
-  font-size: 16px
+font-size: 16px
 }
 </style>
 
@@ -176,9 +176,9 @@ types: macrophages and U937.  Thus the first order of business is to
 observe their similarities/differences.
 
 ```{r}
-type_batch <- set_expt_batches(hs_macrophage, fact = "typeofcells")
-type_batch_norm <- normalize_expt(type_batch, norm = "quant", transform = "log2",
-                                  convert = "cpm", filter = TRUE)
+type_batch <- set_batches(hs_macrophage, fact = "typeofcells")
+type_batch_norm <- normalize(type_batch, norm = "quant", transform = "log2",
+                             convert = "cpm", filter = TRUE)
 type_batch_pca <- plot_pca(type_batch_norm, plot_title = "PCA of macrophage expression values",
                            plot_alpha = 0.6, plot_labels = FALSE)
 
@@ -192,15 +192,15 @@ The differences, as expected are stark.  Thus, let us consider the
 macrophage and U937 samples separately.  In addition, consider the
 samples behind the lense of sample date, strain, infection status, etc.
 
-```{r macro_only}
-hs_macr <- subset_expt(hs_macrophage, subset = "typeofcells=='Macrophages'")
+```{r}
+hs_macr <- subset_se(hs_macrophage, subset = "typeofcells=='Macrophages'")
 
-written <- write_expt(
+written <- write_se(
   hs_macr,
   excel = glue("analyses/macrophage_de/{ver}/read_counts/hs_macr-v{ver}.xlsx"))
 
-macr_norm <- normalize_expt(hs_macr, norm = "quant", transform = "log2",
-                            convert = "cpm", filter = TRUE)
+macr_norm <- normalize(hs_macr, norm = "quant", transform = "log2",
+                       convert = "cpm", filter = TRUE)
 
 macr_pca <- plot_pca(macr_norm, plot_title = "PCA of macrophage expression values",
                      plot_alpha = 0.6, plot_labels = FALSE)
@@ -218,9 +218,9 @@ macr_pca$plot
 dev.off()
 macr_pca
 
-hs_macr_datebatch <- set_expt_batches(hs_macr, fact = "oldnew")
-macr_date_norm <- normalize_expt(hs_macr_datebatch, norm = "quant", transform = "log2",
-                                 convert = "cpm", filter = TRUE)
+hs_macr_datebatch <- set_batches(hs_macr, fact = "oldnew")
+macr_date_norm <- normalize(hs_macr_datebatch, norm = "quant", transform = "log2",
+                            convert = "cpm", filter = TRUE)
 macr_date_pca <- plot_pca(
   macr_date_norm,
   plot_title = "PCA of macrophage expression values, date batch",
@@ -236,11 +236,11 @@ Some of the same questions/observations are interesting for the U937 samples.
 Note to self, I already created this subset in the tmrc2_datasets file, this is redundant.
 
 ```{r}
-hs_u937 <- subset_expt(hs_macrophage, subset = "typeofcells!='Macrophages'")
-u937_written <- write_expt(
+hs_u937 <- subset_se(hs_macrophage, subset = "typeofcells!='Macrophages'")
+u937_written <- write_se(
   hs_u937, excel = glue("analyses/macrophage_de/{ver}/read_counts/hs_u937_reads-v{ver}.xlsx"))
-u937_norm <- normalize_expt(hs_u937, norm = "quant", transform = "log2",
-                            convert = "cpm", filter = TRUE)
+u937_norm <- normalize(hs_u937, norm = "quant", transform = "log2",
+                       convert = "cpm", filter = TRUE)
 u937_pca <- plot_pca(u937_norm, plot_title = "PCA of U937 expression values",
                      plot_alpha = 0.6, plot_labels = FALSE)
 pp(file = glue("images/u937_norm_pca-v{ver}.svg"))
@@ -251,9 +251,9 @@ u937_pca
 
 Having taken some views of the samples, repeat with sva.
 
-```{r macrophage_sva}
-hs_nb <- normalize_expt(hs_macr, convert = "cpm", transform = "log2",
-                        filter = TRUE, batch = "svaseq")
+```{r}
+hs_nb <- normalize(hs_macr, convert = "cpm", transform = "log2",
+                   filter = TRUE, batch = "svaseq")
 hs_nb_pca <- plot_pca(hs_nb, plot_title = "PCA of macrophage expression values post-sva",
                       plot_alpha = 0.6, plot_labels = FALSE)
 
@@ -307,13 +307,14 @@ Thus, for the moment I am going to copy the appropriate block straight
 out of the 03 file.
 
 ```{r}
-new_conditions <- paste0(pData(hs_macrophage)[["macrophagetreatment"]], "_",
-  pData(hs_macrophage)[["macrophagezymodeme"]])
+new_conditions <- paste0(colData(hs_macrophage)[["macrophagetreatment"]], "_",
+                         colData(hs_macrophage)[["macrophagezymodeme"]])
 ## Note the sanitize() call is redundant with the addition of sanitize() in the
 ## datastructures file, but I don't want to wait to rerun that.
-hs_macr <- set_expt_conditions(hs_macrophage, fact = new_conditions) %>%
-  sanitize_expt_pData(column = "drug") %>%
-  subset_expt(subset = "typeofcells!='U937'")
+hs_macr <- set_conditions(hs_macrophage, fact = new_conditions) %>%
+  sanitize_metadata(column = "drug") %>%
+  subset_se(subset = "typeofcells!='U937'") %>%
+  set_colors(color_choices[["treatment_zymo"]])
 ```
 
 I am reasonably certain this is the dataset of interest.
@@ -323,8 +324,8 @@ I am reasonably certain this is the dataset of interest.
 So, now let us repeat the pca with the extra labels and larger canvas.
 
 ```{r}
-hs_macr_norm <- normalize_expt(hs_macr, filter = TRUE, convert = "cpm",
-                               transform = "log2", norm = "quant")
+hs_macr_norm <- normalize(hs_macr, filter = TRUE, convert = "cpm",
+                          transform = "log2", norm = "quant")
 de_pca <- plot_pca(hs_macr_norm)
 ## ok, that looks just like the previous image, now lets make it bigger with labels...
 pretty <- de_pca$plot +
@@ -341,15 +342,15 @@ Now repeat with sva included.  A version of this is currently Figure 1B.
 A recent request was to exclude the shapes for infection strain, so let us add that below.
 
 ```{r}
-hs_macr_nb <- normalize_expt(hs_macr, filter = TRUE, convert = "cpm",
-                               transform = "log2", batch = "svaseq")
+hs_macr_nb <- normalize(hs_macr, filter = TRUE, convert = "cpm",
+                        transform = "log2", batch = "svaseq")
 hs_macr_nb_pca <- plot_pca(hs_macr_nb)
 pp(file = "figures/figure_1b_pca.svg")
 hs_macr_nb_pca[["plot"]]
 dev.off()
 hs_macr_nb_pca
 
-hs_macr_nb_noshape <- set_expt_batches(hs_macr_nb, fact = "experiment")
+hs_macr_nb_noshape <- set_batches(hs_macr_nb, fact = "experiment")
 hs_macr_nb_noshape_pca <- plot_pca(hs_macr_nb_noshape)
 pp(file = "figures/figure_1b_pca_noshape.pdf")
 hs_macr_nb_noshape_pca[["plot"]]
@@ -359,7 +360,7 @@ hs_macr_nb_noshape_pca
 
 ### Correlation heatmaps
 
-```{r correlation_heatmaps}
+```{r}
 corheat <- plot_corheat(macr_norm, plot_title = "Correlation heatmap of macrophage
                  expression values
 ")
@@ -421,6 +422,7 @@ variants.  Three such locations are shown in the following image
 
 * Note, I commented out the picture because I am worried it will mess
 up rendering in the container.
+
 <!--- [igv/igv_snapshot_checking_zymodeme_sample.svg](igv/igv_snapshot_checking_zymodeme_sample.svg) --->
 
 I also wrote a scoring function which sums up all observed variant
@@ -450,15 +452,15 @@ Oddly, when I did this, it appears to not change the results at all,
 let us look a little more closely.
 
 ```{r}
-table(pData(hs_macr)[["donor"]])
-table(pData(hs_macr)[["drug"]])
-table(pData(hs_macr)[["macrophagezymodeme"]])
-table(pData(hs_macr)[["rnaextractiondate"]])
-table(pData(hs_macr)[["oldnew"]])
+table(colData(hs_macr)[["donor"]])
+table(colData(hs_macr)[["drug"]])
+table(colData(hs_macr)[["macrophagezymodeme"]])
+table(colData(hs_macr)[["rnaextractiondate"]])
+table(colData(hs_macr)[["oldnew"]])
 
 donor_drug_zymo_varpart <- simple_varpart(
-    hs_macr,
-    factors = c("donor", "drug", "macrophagezymodeme"))
+  hs_macr, fstring = "~ donor + drug + macrophagezymodeme")
+
 donor_drug_zymo_varpart
 
 by_donor <- replot_varpart_percent(donor_drug_zymo_varpart,
@@ -489,18 +491,17 @@ written <- write_gprofiler_data(
   excel = glue("analyses/macrophage_de/{ver}/gprofiler/high_drug_variance-v{ver}.xlsx"))
 
 time_drug_zymo_varpart <- simple_varpart(
-    hs_macr,
-    factors = c("oldnew", "drug", "macrophagezymodeme"))
+  hs_macr, fstring = "~ oldnew + drug + macrophagezymodeme")
 time_drug_zymo_varpart$partition_plot
 ```
 
 ### Compare to PCA with drug as color and donor as shape.
 
 ```{r}
-drug_donor_test <- set_expt_conditions(hs_macr, fact = "drug") %>%
-  set_expt_batches(fact = "donor")
-drug_donor_norm <- normalize_expt(drug_donor_test, norm = "quant", filter = TRUE,
-                                  convert = "cpm", transform = "log2")
+drug_donor_test <- set_conditions(hs_macr, fact = "drug") %>%
+  set_batches(fact = "donor")
+drug_donor_norm <- normalize(drug_donor_test, norm = "quant", filter = TRUE,
+                             convert = "cpm", transform = "log2")
 donor_pca <- plot_pca(drug_donor_norm)
 pp(file = "figures/donor_norm_pca.svg")
 donor_pca[["plot"]]
@@ -514,19 +515,19 @@ drug_norm_cv
 ### Same comparison, but this time with infected state as shape
 
 ```{r}
-drug_infectedp_test <- set_expt_conditions(hs_macr, fact = "drug") %>%
-  set_expt_batches(fact = "batch")
-drug_infectedp_norm <- normalize_expt(drug_infectedp_test, norm = "quant", filter = TRUE,
-                                  convert = "cpm", transform = "log2")
+drug_infectedp_test <- set_conditions(hs_macr, fact = "drug") %>%
+  set_batches(fact = "batch") %>%
+  set_colors(color_choices[["drug"]])
+drug_infectedp_norm <- normalize(drug_infectedp_test, norm = "quant", filter = TRUE,
+                                 convert = "cpm", transform = "log2")
 plot_pca(drug_infectedp_norm)
 ```
 
 ## Drug zymodeme donor
 
-```{r variancePartition}
+```{r}
 drug_zymo_donor_varpart <- simple_varpart(
-    hs_macr,
-    factors = c("drug", "macrophagezymodeme", "donor"))
+  hs_macr, fstring = "~ drug + macrophagezymodeme + donor")
 
 donor_drug_zymo_varpart$partition_plot
 donor_drug_zymo_varpart$model_used
@@ -542,13 +543,14 @@ do not affect the results.
 ## Donor comparison
 
 ```{r}
-combined_batch <- paste0(pData(hs_macr)[["drug"]], "_",
-  pData(hs_macr)[["macrophagezymodeme"]])
-hs_donors <- set_expt_conditions(hs_macr, fact = "donor") %>%
-  set_expt_batches(fact = "macrophagezymodeme")
+combined_batch <- paste0(colData(hs_macr)[["drug"]], "_",
+                         colData(hs_macr)[["macrophagezymodeme"]])
+hs_donors <- set_conditions(hs_macr, fact = "donor") %>%
+  set_batches(fact = "macrophagezymodeme") %>%
+  set_colors(color_choices[["donor"]])
 
-donor_norm <- normalize_expt(hs_donors, filter = TRUE,
-                             convert = "cpm", transform = "log2")
+donor_norm <- normalize(hs_donors, filter = TRUE,
+                        convert = "cpm", transform = "log2")
 donor_norm_cv <- plot_variance_coefficients(donor_norm)
 donor_norm_cv
 
@@ -558,8 +560,8 @@ macrophage_donor_pca$plot
 dev.off()
 macrophage_donor_pca
 
-donor_nb <- normalize_expt(hs_donors, filter = TRUE, norm = "quant",
-                           convert = "cpm", transform = "log2", batch = "svaseq")
+donor_nb <- normalize(hs_donors, filter = TRUE, norm = "quant",
+                      convert = "cpm", transform = "log2", batch = "svaseq")
 macrophage_donors_sva_pca <- plot_pca(donor_nb, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_donors_sva.png")
 macrophage_donors_sva_pca$plot
@@ -569,19 +571,20 @@ macrophage_donors_sva_pca
 
 ## Drug comparison
 
-```{r drug_visualization}
-hs_drug <- set_expt_conditions(hs_macr, fact = "drug")
+```{r}
+hs_drug <- set_conditions(hs_macr, fact = "drug") %>%
+  set_colors(color_choices[["drug"]])
 
-drug_norm <- normalize_expt(hs_drug, filter = TRUE, norm = "quant",
-                            convert = "cpm", transform = "log2")
+drug_norm <- normalize(hs_drug, filter = TRUE, norm = "quant",
+                       convert = "cpm", transform = "log2")
 drug_norm_pca <- plot_pca(drug_norm, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_drugs.svg")
 drug_norm_pca$plot
 dev.off()
 drug_norm_pca
 
-drug_nb <- normalize_expt(hs_drug, filter = TRUE, norm = "quant",
-                           convert = "cpm", transform = "log2", batch = "svaseq")
+drug_nb <- normalize(hs_drug, filter = TRUE, norm = "quant",
+                     convert = "cpm", transform = "log2", batch = "svaseq")
 drug_nb_pca <- plot_pca(drug_nb, plot_labels = FALSE)
 pp(file = "images/tmrc2_macrophages_drugs_sva.svg")
 drug_nb_pca$plot
@@ -593,7 +596,7 @@ drug_nb_pca
 
 ### Library sizes, non-zero plot, and distribution
 
-```{r parasite_libsize}
+```{r}
 lp_lib <- plot_libsize(lp_macrophage)
 pp(file = "images/lp_macrophage_libsize.svg")
 lp_lib$plot
@@ -654,9 +657,9 @@ sufficient surviving post-treatment parasites, the parasite
 transcriptional profile was not significantly changed by the
 antimonial treatment.
 
-```{r parasite_pca_v1}
-lp_norm <- normalize_expt(lp_macrophage, norm = "quant", transform = "log2",
-                          convert = "cpm", filter = TRUE)
+```{r}
+lp_norm <- normalize(lp_macrophage, norm = "quant", transform = "log2",
+                     convert = "cpm", filter = TRUE)
 lp_pca <- plot_pca(lp_norm, plot_title = "PCA of macrophage expression values",
                    plot_labels = FALSE)
 pp(file = "images/lp_macrophage_norm_pca.svg")
@@ -664,8 +667,8 @@ lp_pca$plot
 dev.off()
 lp_pca
 
-lp_nb <- normalize_expt(lp_macrophage, convert = "cpm", transform = "log2",
-                        filter = "simple", batch = "svaseq")
+lp_nb <- normalize(lp_macrophage, convert = "cpm", transform = "log2",
+                   filter = "simple", batch = "svaseq")
 lp_nb_pca <- plot_pca(lp_nb, plot_title = "PCA of macrophage expression values post-sva",
                       plot_labels = FALSE)
 pp(file = "images/lp_macrophage_nb_pca.svg")
@@ -689,20 +692,20 @@ plot_sm(lp_norm)
 The following repeats the parasite PCA without the peculiar
 post-antimonial sample.
 
-```{r parasite_pca_v2}
-lp_norm_nosb <- normalize_expt(lp_macrophage_nosb, norm = "quant", transform = "log2",
+```{r}
+lp_norm_nosb <- normalize(lp_macrophage_nosb, norm = "quant", transform = "log2",
                           convert = "cpm", filter = TRUE)
 lp_pca_nosb <- plot_pca(lp_norm_nosb, plot_title = "PCA of macrophage expression values",
-                   plot_labels = FALSE)
+                        plot_labels = FALSE)
 pp(file = "images/lp_macrophage_norm_nosb_pca.svg")
 lp_pca_nosb$plot
 dev.off()
 lp_pca_nosb
 
-lp_nb_nosb <- normalize_expt(lp_macrophage_nosb, convert = "cpm", transform = "log2",
+lp_nb_nosb <- normalize(lp_macrophage_nosb, convert = "cpm", transform = "log2",
                         filter = TRUE, batch = "svaseq")
 lp_nb_pca_nosb <- plot_pca(lp_nb_nosb, plot_title = "PCA of macrophage expression values post-sva",
-                      plot_labels = FALSE)
+                           plot_labels = FALSE)
 pp(file = "images/lp_macrophage_nb_nosb_pca.svg")
 lp_nb_pca_nosb$plot
 dev.off()
@@ -733,19 +736,19 @@ One query from Olga and Maria Colmenares is to query a group of kinetoplast gene
 
 Checking my annotations, they appear to be coming from the column 'annot_gene_name'.
 
-```{r query_genes_of_interest}
+```{r}
 wanted <- c("kkt6", "kkt2", "KPAF1", "kkt3", "KRIPP3", "kkt1")
-wanted %in% fData(lp_macrophage)[["annot_gene_name"]]
-ids <- fData(lp_macrophage)[["annot_gene_name"]] %in% wanted
-ids <- rownames(exprs(lp_macrophage))[ids]
-names <- fData(lp_macrophage)[ids, "annot_gene_name"]
-lp_norm <- normalize_expt(lp_macrophage, transform = "log2", convert = "cpm", norm = "quant")
+wanted %in% rowData(lp_macrophage)[["annot_gene_name"]]
+ids <- rowData(lp_macrophage)[["annot_gene_name"]] %in% wanted
+ids <- rownames(assay(lp_macrophage))[ids]
+names <- rowData(lp_macrophage)[ids, "annot_gene_name"]
+lp_norm <- normalize(lp_macrophage, transform = "log2", convert = "cpm", norm = "quant")
 few_lp <- subset_genes(lp_norm, ids = ids, method = "keep")
 few_heat <- plot_sample_heatmap(few_lp, row_label = names)
 few_heat
 ```
 
-```{r saveme}
+```{r}
 pander::pander(sessionInfo())
 message("This is hpgltools commit: ", get_git_commit())
 #  message("Saving to ", savefile)

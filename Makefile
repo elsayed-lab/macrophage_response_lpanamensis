@@ -17,13 +17,15 @@ PARALLEL="TRUE"
 DEFAULT_INPUT="00preprocessing.Rmd:01datasets.Rmd:02visualization.Rmd:03differential_expression.Rmd:README.Rmd"
 
 ## Note x,y is multiple binds, a:b binds host:a to container:b
-SINGULARITY_BIND="/sw/local/R/renv_cache"
+SINGULARITY_BIND="/sw/local/R/renv_cache,/sw/local/spack/cache,/sw/local/apt/cache"
 ## If you are using a non-shared renv cache in your home directory, then you will want to
 ## use some variant of the following:
 ## SINGULARITY_BIND="${HOME}/.cache/renv:/sw/local/R/renv_cache"
 
-%.sif: %.yml $(RMD_FILES) $(SETUP_SCRIPTS) $(CONFIG_FILES) $(BIB)
-	touch data/atb.bib
+clean:
+	sudo rm -rf *_overlay *.sif
+
+%.sif: %.yml $(RMD_FILES) $(SETUP_SCRIPTS) $(CONFIG_FILES) 
 	cp local/etc/bashrc_template local/etc/bashrc
 	echo "export PARALLEL=$(PARALLEL)" >> local/etc/bashrc
 	echo "export DEFAULT_INPUT=$(DEFAULT_INPUT)" >> local/etc/bashrc
@@ -32,10 +34,10 @@ SINGULARITY_BIND="/sw/local/R/renv_cache"
 
 %.overlay: %.yml
 	mkdir -p $(basename $<)_overlay
-	sudo singularity shell -B $(SINGULARITY_BIND) --overlay $(basename $@)_overlay $(basename $@).sif
+	sudo singularity shell -s /usr/bin/bash -B $(SINGULARITY_BIND) --overlay $(basename $@)_overlay $(basename $@).sif
 
 %.shell: %.yml
-	singularity shell -B $(SINGULARITY_BIND) $(basename $@).sif
+	singularity shell -s /usr/bin/bash -B $(SINGULARITY_BIND) $(basename $@).sif
 
 %.runover: %.yml
 	mkdir -p $(basename $<)_overlay

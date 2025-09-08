@@ -1,0 +1,104 @@
+Bootstrap: docker
+From: debian:trixie
+
+## Order of sections:
+## %labels:      unknown, storing metadata
+## %files:       are before %post or installation procedures.
+## %setup:       in the host-system after base OS install.
+## %post:        in the container after base OS install.
+## %test:        run at end of build process.
+## %environment: sourced at runtime, not build; if needed at build, do it in %post.
+## %runscript:   writes the container file /singularity and is run via 'singularity run'
+
+%apphelp hpgltools_test
+echo "Run the hpgltools test suite."
+
+
+%apprun hpgltools_test
+echo "Running the hpgltools test suite."
+exec cd /data/hpgltools && make test
+
+
+%environment
+## If this works properly, I can delete the bashrc, apparently the contents of this stanza are
+## written to /.singularity.d/env/90-environment.sh
+## As of this writing, it appears VERSION is not propagated to the %post block, therefore
+## the definition is repeated there.
+## There is a problem with using the environment block: it uses dash by default instead of bash...
+
+
+## Instead of copying files within the setup section, one should use the files block, I think because
+## this is not run with elevated permissions.
+%files
+local/org.Lpanamensis.MHOMCOL81L13.v68.eg.db_2024.09.tar.gz /data/org.Lpanamensis.MHOMCOL81L13.v68.eg.db_2024.09.tar.gz
+local/BSGenome.Leishmania.panamensis.MHOMCOL81L13.v68_2024.09.tar.gz /data/BSGenome.Leishmania.panamensis.MHOMCOL81L13.v68_2024.09.tar.gz
+local/TxDb.Leishmania.panamensis.MHOMCOL81L13.TriTrypDB.v64_2023.07.tar.gz /data/TxDb.Leishmania.panamensis.MHOMCOL81L13.TriTrypDB.v64_2023.07.tar.gz
+local/etc/bashrc /usr/local/etc/bashrc
+local/etc/deb_packages.txt /usr/local/etc/deb_packages.txt
+local/bin/bootstrap.R /usr/local/bin/bootstrap.R
+local/bin/bootstrap.sh /usr/local/bin/bootstrap.sh
+local/bin/runscript.sh /usr/local/bin/runscript.sh
+data/Makefile /data/Makefile
+data/renv.lock /data/renv.lock
+data/renv/activate.R /data/renv/activate.R
+data/renv/settings.json /data/renv/settings.json
+data/renv/.gitignore /data/renv/.gitignore
+local/etc/template /sw/modules/template
+data/00preprocessing.Rmd /data/00preprocessing.Rmd
+data/01datasets.Rmd /data/01datasets.Rmd
+data/02visualization.Rmd /data/02visualization.Rmd
+data/03differential_expression.Rmd /data/03differential_expression.Rmd
+data/README.Rmd /data/README.Rmd
+data/preprocessing/macrophage_host_counts.tar /data/preprocessing/macrophage_host_counts.tar
+data/preprocessing/macrophage_parasite_counts.tar /data/preprocessing/macrophage_parasite_counts.tar
+data/sample_sheets/macrophage_samples.xlsx /data/sample_sheets/macrophage_samples.xlsx
+
+
+%help
+String printed when "singularity help image.simg" is run.
+
+
+%labels
+Maintainer Ashton Trey Belew <abelew@umd.edu>
+
+
+%post
+/usr/local/bin/bootstrap.sh
+
+
+%runscript
+/usr/local/bin/runscript.sh $*
+
+
+## The setup block will be used to copy material which I cannot acquire
+## automatically.  Ideally this should only be a sample sheet and potentially
+## count tables for now.  ** NOTE ** This section is run as root! So be careful.
+%setup
+mkdir -p ${SINGULARITY_ROOTFS}/usr/local/bin
+mkdir -p ${SINGULARITY_ROOTFS}/usr/local/etc
+mkdir -p ${SINGULARITY_ROOTFS}/.emacs.d
+mkdir -p ${SINGULARITY_ROOTFS}/data/preprocessing
+mkdir -p ${SINGULARITY_ROOTFS}/data/renv
+mkdir -p ${SINGULARITY_ROOTFS}/data/cpm
+mkdir -p ${SINGULARITY_ROOTFS}/data/rpkm
+mkdir -p ${SINGULARITY_ROOTFS}/data/images
+mkdir -p ${SINGULARITY_ROOTFS}/data/figures
+mkdir -p ${SINGULARITY_ROOTFS}/data/rda
+mkdir -p ${SINGULARITY_ROOTFS}/data/excel
+mkdir -p ${SINGULARITY_ROOTFS}/data/sample_sheets
+mkdir -p ${SINGULARITY_ROOTFS}/output
+mkdir -p ${SINGULARITY_ROOTFS}/sw/local/conda
+mkdir -p ${SINGULARITY_ROOTFS}/sw/local/R/renv_cache
+mkdir -p ${SINGULARITY_ROOTFS}/sw/local/apt/cache
+mkdir -p ${SINGULARITY_ROOTFS}/sw/modules
+mkdir -p ${SINGULARITY_ROOTFS}/sw/local/spack/cache
+if test -e "${HOME}/hpgltools"; then
+  mkdir -p ${SINGULARITY_ROOTFS}/data/hpgltools && rsync -av "${HOME}/hpgltools/" "${SINGULARITY_ROOTFS}/data/hpgltools/"
+else
+  mkdir -p ${SINGULARITY_ROOTFS}/data/hpgltools && git clone https://github.com/abelew/hpgltools "${SINGULARITY_ROOTFS}/data/hpgltools/"
+fi
+
+
+%test
+echo "Making sure hpgltools got installed."
+test -d "/data/hpgltools" || true

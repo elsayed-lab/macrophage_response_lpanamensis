@@ -85,33 +85,6 @@ In all cases the processing performed was:
     against all human-derived samples.  The results from this were
     copy/pasted into the sample sheet.
 
-# Notes 20221206 meeting
-
-I am thinking that this meeting will bring Maria Adelaida fully back
-into the analyses of the parasite data, and therefore may focus
-primarily on the goals rather than the analyses?
-
-* Maria Adelaida meeting with Olgla/Mariana: integrating
-  transcriptomics/genomics question.
-* Paper on relationship btwn primary metadata factors via transcriptome/genome.
-* Second on drug susceptibility without those factors (I think this
-  means the macrophages)
-* Definition of species?  MAG: Define consensus sequences for various
-  strains/species.  We effectively have this on hand, though the
-  quality may be a little less good for 2.3.
-* Resulting goal: Create a tree of the strains (I am just going to
-  call zymodemes strains from now on).
-**  What organisms would we include in a tree to describe these
-    relationships: guyanensis, braziliensis 2904, 2.2, 2.3, 2.1, 2.4,
-    panamensis reference, peruviania(sp? I have not seen this genome),
-    panama, 2903; actually this may be tricky because we have always
-    done this with a specific reference strain (panamensis col) which is
-    one of the strains in the comparison.  hmm...
-**  Check the most variant strains for identity (Luc)
-**  Methods for creating tree, traditional phylogeny vs. variant
-    hclust?
-* PCR queries, works well if one performs sanger sequencing.
-
 ## Multiple datasets
 
 In a couple of important ways the TMRC2 data is much more complex than the
@@ -247,63 +220,69 @@ plotting the various ways of discerning the data.
 
 ```{r}
 color_choices <- list(
-    "strain" = list(
-        ## "z1.0" = "#333333", ## Changed this to 'braz' to make it easier to find them.
-        "z2.0" = "#555555",
-        "z3.0" = "#777777",
-        "z2.1" = "#874400",
-        "z2.2" = "#0000cc",
-        "z2.3" = "#cc0000",
-        "z2.4" = "#df7000",
-        "z3.2" = "#888888",
-        "z1.0" = "#cc00cc",
-        "z1.5" = "#cc00cc",
-        "b2904" = "#cc00cc",
-        "unknown" = "#cbcbcb"),
-    ## "null" = "#000000"),
-    "zymo" = list(
-      "z22" = "#0000cc",
-      "z23" = "#cc0000"),
-    "cf" = list(
-        "cure" = "#006f00",
-        "fail" = "#9dffa0",
-        "unknown" = "#cbcbcb",
-        "notapplicable" = "#000000"),
-    "condition" = list(
-      "inf" = "#199c75",
-      "inf_sb" = "#d65d00",
-      "uninf" = "#6e6ea3",
-      "uninf_sb" = "#d83956"),
-    "significance" = list(
-      "lt0" = "#ffe0e0",
-      "lt1" = "#ffa0a0",
-      "lt2" = "#f94040",
-      "lt4" = "#a00000",
-      "gt0" = "#eeccf9",
-      "gt1" = "#de8bf9",
-      "gt2" = "#ad07e3",
-      "gt4" = "#410257"),
-    "drug" = list(
-      "none" = "#989898",
-      "antimony" = "#088b64"),
-    "oldnew" = list(
-      "previous" = "#2233aa",
-      "current" =  "#9c0303"),
-    "infectedp" = list(
-      "uninfected" = "#676767",
-      "infected" = "#ac06e2"),
-    "treatment_zymo" = list(
-      "infsb_z23" = "#E7298A",
-      "inf_z23" = "#D95F02",
-      "uninf_none" = "#66A61E",
-      "uninfsb_none" = "#E6AB02",
-      "inf_z22" = "#1B9E77",
-      "infsb_z22" = "#7570B3"),
-    "susceptibility" = list(
-        "resistant" = "#8563a7",
-        "sensitive" = "#8d0000",
-        "ambiguous" = "#cbcbcb",
-        "unknown" = "#555555"))
+  "strain" = list(
+    ## "z1.0" = "#333333", ## Changed this to 'braz' to make it easier to find them.
+    "z2.0" = "#555555",
+    "z3.0" = "#777777",
+    "z2.1" = "#874400",
+    "z2.2" = "#0000cc",
+    "z2.3" = "#cc0000",
+    "z2.4" = "#df7000",
+    "z3.2" = "#888888",
+    "z1.0" = "#cc00cc",
+    "z1.5" = "#cc00cc",
+    "b2904" = "#cc00cc",
+    "unknown" = "#cbcbcb"),
+  ## "null" = "#000000"),
+  "zymo" = list(
+    "none" = "#000000",
+    "z22" = "#0000cc",
+    "z23" = "#cc0000"),
+  "cf" = list(
+    "cure" = "#006f00",
+    "fail" = "#9dffa0",
+    "unknown" = "#cbcbcb",
+    "notapplicable" = "#000000"),
+  "condition" = list(
+    "inf" = "#199c75",
+    "inf_sb" = "#d65d00",
+    "uninf" = "#6e6ea3",
+    "uninf_sb" = "#d83956"),
+  "significance" = list(
+    "lt0" = "#ffe0e0",
+    "lt1" = "#ffa0a0",
+    "lt2" = "#f94040",
+    "lt4" = "#a00000",
+    "gt0" = "#eeccf9",
+    "gt1" = "#de8bf9",
+    "gt2" = "#ad07e3",
+    "gt4" = "#410257"),
+  "drug" = list(
+    "none" = "#989898",
+    "antimony" = "#088b64"),
+  "oldnew" = list(
+    "previous" = "#2233aa",
+    "current" =  "#9c0303"),
+  "infectedp" = list(
+    "uninfected" = "#676767",
+    "infected" = "#ac06e2"),
+  "treatment_zymo" = list(
+    "inf_sb_z23" = "#E7298A",
+    "inf_z23" = "#D95F02",
+    "uninf_none" = "#66A61E",
+    "uninf_sb_none" = "#E6AB02",
+    "inf_z22" = "#1B9E77",
+    "inf_sb_z22" = "#7570B3"),
+  "donor" = list(
+    "d01" = "#8d0000",
+    "d02" = "#E6AB02",
+    "d09" = "#7570B3",
+    "d81" = "#2233aa"),
+  "susceptibility" = list(
+    "resistant" = "#8563a7",
+    "sensitive" = "#8d0000",
+    "ambiguous" = "#cbcbcb",
+    "unknown" = "#555555"))
 data_structures <- c(data_structures, "color_choices")
 ```
 
@@ -325,7 +304,7 @@ load_biomart_annotations() _or_ change the function to search a couple
 more months before it stops trying to find an archive.
 
 ```{r}
-hs_annot <- load_biomart_annotations(year = "2020", month = "04")
+hs_annot <- load_biomart_annotations(year = "2020", month = "04", symbol_columns = "hgnc_symbol")
 hs_annot <- hs_annot[["annotation"]]
 hs_annot[["transcript"]] <- paste0(rownames(hs_annot), ".", hs_annot[["transcript_version"]])
 rownames(hs_annot) <- make.names(hs_annot[["ensembl_gene_id"]], unique = TRUE)
@@ -338,30 +317,30 @@ rownames(macr_annot) <- gsub(x = rownames(macr_annot),
                              pattern = "^gene:",
                              replacement = "")
 
-hs_macrophage <- create_expt(sample_sheet, gene_info = macr_annot,
-                             file_column = "hg38100hisatfile") %>%
-  set_expt_conditions(fact = "macrophagetreatment") %>%
-  set_expt_batches(fact = "macrophagezymodeme") %>%
-  sanitize_expt_pData(columns = sanitize_columns) %>%
-  subset_expt(nonzero = 12000)
-fixed_genenames <- gsub(x = rownames(exprs(hs_macrophage)), pattern = "^gene:",
+hs_macrophage <- create_se(sample_sheet, gene_info = macr_annot,
+                           file_column = "hg38100hisatfile") %>%
+  set_conditions(fact = "macrophagetreatment") %>%
+  set_batches(fact = "macrophagezymodeme") %>%
+  sanitize_metadata(columns = sanitize_columns) %>%
+  subset_se(nonzero = 12000)
+fixed_genenames <- gsub(x = rownames(assay(hs_macrophage)), pattern = "^gene:",
                         replacement = "")
-hs_macrophage <- set_expt_genenames(hs_macrophage, ids = fixed_genenames)
-table(pData(hs_macrophage)$condition)
+hs_macrophage <- set_genenames(hs_macrophage, ids = fixed_genenames)
+table(colData(hs_macrophage)$condition)
 ## Added to make a simplified PCA plot.
-pData(hs_macrophage)[["experiment"]] <- "macrophage"
+colData(hs_macrophage)[["experiment"]] <- "macrophage"
 
 ## The following 3 lines were copy/pasted to datastructures and should be removed soon.
-nostrain <- is.na(pData(hs_macrophage)[["strainid"]])
-pData(hs_macrophage)[nostrain, "strainid"] <- "none"
+nostrain <- is.na(colData(hs_macrophage)[["strainid"]])
+colData(hs_macrophage)[nostrain, "strainid"] <- "none"
 
-pData(hs_macrophage)[["strain_zymo"]] <- paste0("s", pData(hs_macrophage)[["strainid"]],
-                                                "_", pData(hs_macrophage)[["macrophagezymodeme"]])
-uninfected <- pData(hs_macrophage)[["strain_zymo"]] == "snone_none"
-pData(hs_macrophage)[uninfected, "strain_zymo"] <- "uninfected"
+colData(hs_macrophage)[["strain_zymo"]] <- paste0("s", colData(hs_macrophage)[["strainid"]],
+                                                "_", colData(hs_macrophage)[["macrophagezymodeme"]])
+uninfected <- colData(hs_macrophage)[["strain_zymo"]] == "snone_none"
+colData(hs_macrophage)[uninfected, "strain_zymo"] <- "uninfected"
 
-pData(hs_macrophage)[["infectedp"]] <- "infected"
-pData(hs_macrophage)[uninfected, "infectedp"] <- "uninfected"
+colData(hs_macrophage)[["infectedp"]] <- "infected"
+colData(hs_macrophage)[uninfected, "infectedp"] <- "uninfected"
 
 data_structures <- c(data_structures, "hs_macrophage")
 ```
@@ -383,50 +362,50 @@ sample_sheet_ids = c("TMRC30051","TMRC30057","TMRC30059","TMRC30060","TMRC30061"
                      "TMRC30297","TMRC30298","TMRC30299","TMRC30300","TMRC30295","TMRC30296",
                      "TMRC30303","TMRC30304","TMRC30301","TMRC30302","TMRC30314","TMRC30315",
                      "TMRC30313")
-found <- sample_sheet_ids %in% colnames(exprs(hs_macr))
-colnames(exprs(hs_macr))[!found]
+found <- sample_sheet_ids %in% colnames(assay(hs_macrophage))
+colnames(assay(hs_macrophage))[!found]
 ```
 
 ## Subset and create different groupings
 
 ```{r}
-all_human <- sanitize_expt_pData(hs_macrophage, columns = "drug") %>%
-  set_expt_conditions(fact = "drug") %>%
-  set_expt_batches(fact = "typeofcells")
+all_human <- sanitize_metadata(hs_macrophage, columns = "drug") %>%
+  set_conditions(fact = "drug") %>%
+  set_batches(fact = "typeofcells")
 data_structures <- c(data_structures, "all_human")
 
 ## The following 3 lines were copy/pasted to datastructures and should be removed soon.
-no_strain_idx <- pData(all_human)[["strainid"]] == "none"
-##pData(all_human)[["strainid"]] <- paste0("s", pData(all_human)[["strainid"]],
-##                                         "_", pData(all_human)[["macrophagezymodeme"]])
-pData(all_human)[no_strain_idx, "strainid"] <- "none"
-table(pData(all_human)[["strainid"]])
+no_strain_idx <- colData(all_human)[["strainid"]] == "none"
+##colData(all_human)[["strainid"]] <- paste0("s", colData(all_human)[["strainid"]],
+##                                         "_", colData(all_human)[["macrophagezymodeme"]])
+colData(all_human)[no_strain_idx, "strainid"] <- "none"
+table(colData(all_human)[["strainid"]])
 
-all_human_types <- set_expt_conditions(all_human, fact = "typeofcells") %>%
-  set_expt_batches(fact = "drug")
+all_human_types <- set_conditions(all_human, fact = "typeofcells") %>%
+  set_batches(fact = "drug")
 data_structures <- c(data_structures, "all_human_types")
 
-type_zymo_fact <- paste0(pData(all_human_types)[["condition"]], "_",
-                         pData(all_human_types)[["macrophagezymodeme"]])
-type_zymo <- set_expt_conditions(all_human_types, fact = type_zymo_fact)
+type_zymo_fact <- paste0(colData(all_human_types)[["condition"]], "_",
+                         colData(all_human_types)[["macrophagezymodeme"]])
+type_zymo <- set_conditions(all_human_types, fact = type_zymo_fact)
 data_structures <- c(data_structures, "type_zymo")
 
-type_drug_fact <- paste0(pData(all_human_types)[["condition"]], "_",
-                         pData(all_human_types)[["drug"]])
-type_drug <- set_expt_conditions(all_human_types, fact = type_drug_fact)
+type_drug_fact <- paste0(colData(all_human_types)[["condition"]], "_",
+                         colData(all_human_types)[["drug"]])
+type_drug <- set_conditions(all_human_types, fact = type_drug_fact)
 data_structures <- c(data_structures, "type_drug")
 
-strain_fact <- pData(all_human_types)[["strainid"]]
+strain_fact <- colData(all_human_types)[["strainid"]]
 table(strain_fact)
 
-new_conditions <- paste0(pData(hs_macrophage)[["macrophagetreatment"]], "_",
-                         pData(hs_macrophage)[["macrophagezymodeme"]])
+new_conditions <- paste0(colData(hs_macrophage)[["macrophagetreatment"]], "_",
+                         colData(hs_macrophage)[["macrophagezymodeme"]])
 ## Note the sanitize() call is redundant with the addition of sanitize() in the
 ## datastructures file, but I don't want to wait to rerun that.
-hs_macr <- set_expt_conditions(hs_macrophage, fact = new_conditions) %>%
-  sanitize_expt_pData(column = "drug") %>%
-  set_expt_colors(color_choices[["treatment_zymo"]]) %>%
-  subset_expt(subset = "typeofcells!='U937'")
+hs_macr <- set_conditions(hs_macrophage, fact = new_conditions) %>%
+  sanitize_metadata(column = "drug") %>%
+  set_se_colors(color_choices[["treatment_zymo"]]) %>%
+  subset_se(subset = "typeofcells!='U937'")
 data_structures <- c(data_structures, "hs_macr")
 
 ggstats_parasite <- plot_metadata_factors(hs_macr, column = "parasitemappingrate",
@@ -436,13 +415,13 @@ ggstats_parasite
 dev.off()
 ggstats_parasite
 
-hs_macr_drug_expt <- set_expt_conditions(hs_macr, fact = "drug")
+hs_macr_drug_expt <- set_conditions(hs_macr, fact = "drug")
 
-hs_macr_strain_expt <- set_expt_conditions(hs_macr, fact = "macrophagezymodeme") %>%
-  subset_expt(subset = "macrophagezymodeme != 'none'")
+hs_macr_strain_expt <- set_conditions(hs_macr, fact = "macrophagezymodeme") %>%
+  subset_se(subset = "macrophagezymodeme != 'none'")
 data_structures <- c(data_structures, "hs_macr_strain_expt")
 
-table(pData(hs_macr)[["strainid"]])
+table(colData(hs_macr)[["strainid"]])
 ```
 
 Let us see if the sankey plot of these samples looks useful...
@@ -466,7 +445,7 @@ macr_sankey
 Finally, split off the U937 samples.
 
 ```{r}
-hs_u937 <- subset_expt(hs_macrophage, subset = "typeofcells!='Macrophages'")
+hs_u937 <- subset_se(hs_macrophage, subset = "typeofcells!='Macrophages'")
 data_structures <- c(data_structures, "hs_u937")
 ```
 
@@ -477,40 +456,39 @@ annotation data, this time we can just use our existing parasite gene
 annotations.
 
 ```{r}
-lp_macrophage <- create_expt(sample_sheet,
-                             file_column = "lpanamensisv36hisatfile",
-                             gene_info = all_lp_annot,
-                             savefile = glue("rda/lp_macrophage-v{ver}.rda"),
-                             annotation = "org.Lpanamensis.MHOMCOL81L13.v46.eg.db") %>%
-set_expt_conditions(fact = "macrophagezymodeme") %>%
-  set_expt_batches(fact = "macrophagetreatment")
+lp_macrophage <- create_se(
+  sample_sheet, file_column = "lpanamensisv36hisatfile", gene_info = all_lp_annot,
+  savefile = glue("rda/lp_macrophage-v{ver}.rda"),
+  annotation = "org.Lpanamensis.MHOMCOL81L13.v46.eg.db") %>%
+  set_conditions(fact = "macrophagezymodeme") %>%
+  set_batches(fact = "macrophagetreatment")
 
-unfilt_written <- write_expt(
+unfilt_written <- write_se(
   lp_macrophage,
   excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_reads_unfiltered-v{ver}.xlsx"))
 
-lp_macrophage_filt <- subset_expt(lp_macrophage, nonzero = 2500) %>%
-  semantic_expt_filter(semantic = c("amastin", "gp63", "leishmanolysin"),
-                       semantic_column = "annot_gene_product")
+lp_macrophage_filt <- subset_se(lp_macrophage, nonzero = 2500) %>%
+  semantic_filter(semantic = c("amastin", "gp63", "leishmanolysin"),
+                  semantic_column = "annot_gene_product")
 data_structures <- c(data_structures, "lp_macrophage", "lp_macrophage_filt")
 
-filt_written <- write_expt(lp_macrophage_filt,
+filt_written <- write_se(lp_macrophage_filt,
   excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_reads_filtered-v{ver}.xlsx"))
 lp_macrophage <- lp_macrophage_filt
 
-lp_macrophage_nosb <- subset_expt(lp_macrophage, subset="batch!='inf_sb'")
-lp_nosb_write <- write_expt(
+lp_macrophage_nosb <- subset_se(lp_macrophage, subset="batch!='inf_sb'")
+lp_nosb_write <- write_se(
   lp_macrophage_nosb,
   excel = glue("analyses/macrophage_de/{ver}/read_counts/lp_macrophage_nosb_reads-v{ver}.xlsx"))
 data_structures <- c(data_structures, "lp_macrophage_nosb")
 
 spec <- make_rnaseq_spec()
-test <- sm(gather_preprocessing_metadata(sample_sheet, specification = spec))
+test <- gather_preprocessing_metadata(sample_sheet, specification = spec)
 ```
 
 # Save all data structures into one rda
 
-```{r save_all_data}
+```{r}
 found_idx <- data_structures %in% ls()
 if (sum(!found_idx) > 0) {
   not_found <- data_structures[!found_idx]
@@ -520,7 +498,7 @@ if (sum(!found_idx) > 0) {
 save(list = data_structures, file = glue("rda/tmrc2_data_structures-v{ver}.rda"))
 ```
 
-```{r saveme}
+```{r}
 pander::pander(sessionInfo())
 message("This is hpgltools commit: ", get_git_commit())
 message("Saving to ", savefile)

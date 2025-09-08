@@ -36,5 +36,3 @@ if [[ -f /usr/share/modules/init/bash ]]; then
 fi
 
 ## Note to self: the bashrc gets overwritten by the bashrc_template when make is run.
-export PARALLEL=TRUE
-export DEFAULT_INPUT=00preprocessing.Rmd:01datasets.Rmd:02visualization.Rmd:03differential_expression.Rmd:README.Rmd
